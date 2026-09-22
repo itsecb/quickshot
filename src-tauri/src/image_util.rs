@@ -68,12 +68,15 @@ pub fn blit(dst: &mut RgbaImage, src: &RgbaImage, dx: i64, dy: i64) {
         return;
     }
     let row_len = ((x1 - x0) * 4) as usize;
+    let src_raw = src.as_raw();
+    // Index the flat subpixel buffer; ImageBuffer's own Index takes (x, y).
+    let dst_raw: &mut [u8] = &mut **dst;
     for y in y0..y1 {
         let sy = (y - dy) as usize;
         let sx = (x0 - dx) as usize;
         let s_start = (sy * sw as usize + sx) * 4;
         let d_start = (y as usize * dw as usize + x0 as usize) * 4;
-        dst[d_start..d_start + row_len].copy_from_slice(&src.as_raw()[s_start..s_start + row_len]);
+        dst_raw[d_start..d_start + row_len].copy_from_slice(&src_raw[s_start..s_start + row_len]);
     }
 }
 
