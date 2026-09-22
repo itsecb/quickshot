@@ -15,10 +15,11 @@ jobs:
         include:
           - platform: windows-latest
             args: ""
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+          # macOS disabled for now: its runner minutes bill at 10x on private repos
+          # - platform: macos-latest
+          #   args: "--target aarch64-apple-darwin"
+          # - platform: macos-latest
+          #   args: "--target x86_64-apple-darwin"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4

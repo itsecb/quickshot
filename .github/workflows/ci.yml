@@ -28,7 +28,8 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-          - os: macos-latest
+          # macOS disabled for now: its runner minutes bill at 10x on private repos
+          # - os: macos-latest
           - os: ubuntu-24.04
     runs-on: ${{ matrix.os }}
     steps:
