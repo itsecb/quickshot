@@ -80,7 +80,7 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
                 (r.Height as f64 * scale_back) as u32,
             );
             bbox = Some(match bbox {
-                Some(b) => Rect::union_all([&b, &wr]).unwrap_or(wr),
+                Some(b) => Rect::union_all([b, wr]).unwrap_or(wr),
                 None => wr,
             });
         }

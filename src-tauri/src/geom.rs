@@ -48,9 +48,9 @@ impl Rect {
     }
 
     /// Bounding box of all given rects.
-    pub fn union_all<'a>(rects: impl IntoIterator<Item = &'a Rect>) -> Option<Rect> {
+    pub fn union_all(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
         let mut it = rects.into_iter();
-        let first = *it.next()?;
+        let first = it.next()?;
         let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.right(), first.bottom());
         for r in it {
             x0 = x0.min(r.x);
@@ -91,7 +91,7 @@ mod tests {
     fn union() {
         let rects = [Rect::new(-1920, 0, 1920, 1080), Rect::new(0, 0, 2560, 1440)];
         assert_eq!(
-            Rect::union_all(&rects),
+            Rect::union_all(rects),
             Some(Rect::new(-1920, 0, 4480, 1440))
         );
     }

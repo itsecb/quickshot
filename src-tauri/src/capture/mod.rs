@@ -94,7 +94,7 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
             return Vec::new();
         }
     };
-    let screen = Rect::union_all(frames.iter().map(|f| &f.monitor.rect())).unwrap_or_default();
+    let screen = Rect::union_all(frames.iter().map(|f| f.monitor.rect())).unwrap_or_default();
     let mut out = Vec::new();
     for w in windows {
         if w.is_minimized().unwrap_or(false) {
