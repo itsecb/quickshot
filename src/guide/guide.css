@@ -1,0 +1,195 @@
+.guide {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100vh;
+}
+
+aside {
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+aside .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px;
+  font-weight: 600;
+}
+
+aside ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px;
+  overflow: auto;
+  flex: 1;
+}
+
+aside li .proj {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+
+aside li .proj small {
+  color: var(--fg-muted);
+}
+
+aside li .proj.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+aside li .proj.active small {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.project-head {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-head .title {
+  font-size: 18px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 4px 6px;
+  border-radius: 6px;
+  width: 100%;
+}
+
+.project-head .title:hover,
+.project-head .title:focus {
+  border-color: var(--border);
+  background: var(--bg-elev);
+}
+
+.project-head textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions .spacer {
+  flex: 1;
+}
+
+.steps {
+  overflow: auto;
+  padding: 16px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 36px 1fr 260px;
+  gap: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.step .n {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.step .fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step .fields input[type="text"] {
+  width: 100%;
+  font-weight: 600;
+}
+
+.step .fields textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  font-family: var(--font);
+}
+
+.step .thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.step .thumb img {
+  max-width: 260px;
+  max-height: 180px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  object-fit: contain;
+  background: #000;
+}
+
+.step .thumb .btns {
+  display: flex;
+  gap: 4px;
+}
+
+.step .thumb .btns button {
+  padding: 3px 8px;
+}
+
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.empty kbd {
+  margin: 0 2px;
+}
+
+.status {
+  padding: 6px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 12px;
+  min-height: 28px;
+}
+
+.status.error {
+  color: var(--danger);
+}

@@ -1,0 +1,38 @@
+{
+  "name": "quickshot",
+  "version": "0.1.0",
+  "description": "Fast, lightweight screenshot capture, markup and guide builder",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@crabnebula/tauri-plugin-drag": "^2.1.0",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-autostart": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-store": "^2",
+    "docx": "^9.7.0",
+    "konva": "^10.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tauri-apps/cli": "^2.11.0",
+    "@tsconfig/svelte": "^5.0.4",
+    "svelte": "^5.56.0",
+    "svelte-check": "^4.6.0",
+    "typescript": "~5.9.0",
+    "vite": "^8.0.0"
+  }
+}
