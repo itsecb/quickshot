@@ -292,10 +292,8 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 rect: frame.monitor.rect(),
                 ..Default::default()
             };
-            fill_app(
-                &mut source,
-                window_at_center(&list_windows(&frames), source.rect),
-            );
+            let rect = source.rect;
+            fill_app(&mut source, window_at_center(&list_windows(&frames), rect));
             let capture = state.insert_capture(app, frame.image.clone(), source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
         }
