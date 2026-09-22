@@ -149,6 +149,7 @@ class Overlay {
     e.preventDefault();
     const global = this.toGlobal(this.toLocal(e));
     if (this.init.mode === "color") {
+      this.cursor = this.toLocal(e);
       void this.pickColor(e.shiftKey);
       return;
     }

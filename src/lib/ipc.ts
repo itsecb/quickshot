@@ -20,7 +20,10 @@ type Headers = Record<string, string>;
 
 /** invoke with a binary body; headers carry small string parameters. */
 function invokeRaw<T>(cmd: string, bytes: Uint8Array, headers: Headers = {}): Promise<T> {
-  return invoke<T>(cmd, bytes, { headers });
+  // Header values must be Latin-1; percent-encode so paths and titles with any character survive.
+  const encoded: Headers = {};
+  for (const [k, v] of Object.entries(headers)) encoded[k] = encodeURIComponent(v);
+  return invoke<T>(cmd, bytes, { headers: encoded });
 }
 
 // ---- capture / overlay ----

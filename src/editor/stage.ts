@@ -55,6 +55,8 @@ function shadowProps(on: boolean) {
 /** Build Konva nodes for a document. Shared by the live stage and the export stage. */
 export function buildShapeNodes(layer: Konva.Layer, doc: Document, image: HTMLCanvasElement) {
   layer.destroyChildren();
+  // The screenshot lives in the same layer so blend modes (highlighter multiply) see it.
+  layer.add(new Konva.Image({ image, x: 0, y: 0, listening: false, name: "bg" }));
   for (const s of doc.shapes) {
     const node = buildNode(s, image);
     if (node) layer.add(node as Konva.Group);
@@ -223,10 +225,7 @@ export function buildNode(s: Shape, image: HTMLCanvasElement): Konva.Node | null
 export function renderDocument(doc: Document, image: HTMLCanvasElement): HTMLCanvasElement {
   const host = document.createElement("div");
   const stage = new Konva.Stage({ container: host, width: doc.imageWidth, height: doc.imageHeight });
-  const bg = new Konva.Layer({ listening: false });
-  bg.add(new Konva.Image({ image, x: 0, y: 0 }));
   const shapes = new Konva.Layer({ listening: false });
-  stage.add(bg);
   stage.add(shapes);
   buildShapeNodes(shapes, doc, image);
   const crop = doc.crop ?? { x: 0, y: 0, width: doc.imageWidth, height: doc.imageHeight };
@@ -237,7 +236,6 @@ export function renderDocument(doc: Document, image: HTMLCanvasElement): HTMLCan
 
 export class EditorStage {
   stage: Konva.Stage;
-  private bgLayer = new Konva.Layer({ listening: false });
   private shapeLayer = new Konva.Layer();
   private uiLayer = new Konva.Layer();
   private transformer: Konva.Transformer;
@@ -263,8 +261,6 @@ export class EditorStage {
     this.doc = doc;
     this.style = style;
     this.stage = new Konva.Stage({ container, width: container.clientWidth, height: container.clientHeight });
-    this.bgLayer.add(new Konva.Image({ image, x: 0, y: 0 }));
-    this.stage.add(this.bgLayer);
     this.stage.add(this.shapeLayer);
     this.stage.add(this.uiLayer);
     this.transformer = new Konva.Transformer({
@@ -307,7 +303,7 @@ export class EditorStage {
 
   private rebuild() {
     buildShapeNodes(this.shapeLayer, this.doc, this.image);
-    this.shapeLayer.getChildren().forEach((n) => n.draggable(this.tool === "select"));
+    this.shapeLayer.find(".shape").forEach((n) => n.draggable(this.tool === "select"));
     this.shapeLayer.listening(this.tool === "select");
     this.updateCropMask();
     this.shapeLayer.batchDraw();
@@ -319,27 +315,33 @@ export class EditorStage {
     this.tool = tool;
     if (tool !== "select") this.select(null);
     this.shapeLayer.listening(tool === "select");
-    this.shapeLayer.getChildren().forEach((n) => n.draggable(tool === "select"));
+    this.shapeLayer.find(".shape").forEach((n) => n.draggable(tool === "select"));
     this.container.style.cursor = tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
     this.updateCropMask();
   }
 
   setStyle(style: Style) {
+    const prev = this.style;
     this.style = style;
-    // apply colour / width live to the selected shape
-    if (this.selectedId) {
-      const s = this.doc.shapes.find((x) => x.id === this.selectedId);
-      if (s) {
-        const patch: Partial<Shape> = { stroke: style.stroke };
-        if (s.type !== "text" && s.type !== "badge" && s.type !== "blur") patch.strokeWidth = style.strokeWidth;
-        if (s.type === "text") (patch as Partial<TextShape>).fontSize = style.fontSize;
-        if (s.type === "blur") {
-          (patch as Partial<BlurShape>).amount = style.blurAmount;
-          (patch as Partial<BlurShape>).mode = style.blurMode;
-        }
-        this.commit(updateShape(this.doc, s.id, patch));
-      }
+    // apply only the changed properties to the selected shape
+    const s = this.selectedShape();
+    if (!s) return;
+    const patch: Record<string, unknown> = {};
+    if (style.stroke !== prev.stroke) {
+      patch.stroke = style.stroke;
+      if ((s.type === "rect" || s.type === "ellipse") && s.fill) patch.fill = style.stroke + "33";
     }
+    if (style.strokeWidth !== prev.strokeWidth && s.type !== "text" && s.type !== "badge" && s.type !== "blur") {
+      patch.strokeWidth = s.type === "highlighter" ? Math.max(14, style.strokeWidth * 4) : style.strokeWidth;
+    }
+    if (style.shadow !== prev.shadow && s.type !== "blur" && s.type !== "highlighter") patch.shadow = style.shadow;
+    if (style.fontSize !== prev.fontSize && s.type === "text") patch.fontSize = style.fontSize;
+    if (style.fill !== prev.fill && (s.type === "rect" || s.type === "ellipse")) patch.fill = style.fill ? style.stroke + "33" : null;
+    if (s.type === "blur" && (style.blurAmount !== prev.blurAmount || style.blurMode !== prev.blurMode)) {
+      patch.amount = style.blurAmount;
+      patch.mode = style.blurMode;
+    }
+    if (Object.keys(patch).length) this.commit(updateShape(this.doc, s.id, patch as Partial<Shape>));
   }
 
   // ---------- selection ----------
@@ -511,7 +513,7 @@ export class EditorStage {
           this.select(node.id());
           return;
         }
-        if (target === st || target.getLayer() === this.bgLayer) this.select(null);
+        if (target === st || target.hasName("bg")) this.select(null);
         return;
       }
       this.beginDraw(p, e.evt as MouseEvent);

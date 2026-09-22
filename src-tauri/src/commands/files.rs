@@ -32,7 +32,7 @@ fn check_path(p: &str) -> AppResult<PathBuf> {
 #[tauri::command]
 pub fn fs_write(request: Request<'_>) -> AppResult<String> {
     let path = check_path(
-        header(&request, "x-path")
+        &header(&request, "x-path")
             .ok_or_else(|| AppError::Other("x-path header missing".into()))?,
     )?;
     let bytes = raw_body(&request)?;

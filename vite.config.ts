@@ -10,6 +10,9 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
+  resolve: {
+    alias: { $lib: resolve(root, "src/lib"), $ui: resolve(root, "src/ui") },
+  },
   server: {
     port: 1420,
     strictPort: true,

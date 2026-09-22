@@ -31,14 +31,14 @@ pub fn guide_push_step(
 ) -> AppResult<u64> {
     let bytes = raw_body(&request)?;
     let img = decode_png(&bytes)?;
-    let title = header(&request, "x-title").unwrap_or("").to_string();
+    let title = header(&request, "x-title").unwrap_or_default();
     let source = CaptureSource {
         kind: "guide".into(),
         title: title.clone(),
         rect: Rect::new(0, 0, img.width(), img.height()),
         ..Default::default()
     };
-    let capture = state.insert_capture(img, source);
+    let capture = state.insert_capture(&app, img, source);
     let step = PendingStep {
         id: capture.id,
         title,
@@ -50,7 +50,12 @@ pub fn guide_push_step(
     if app.get_webview_window("guide").is_some() {
         let _ = app.emit_to("guide", "guide://step-added", &step);
     } else {
-        windows::open_guide(&app);
+        // Window creation must not happen inside a synchronous command (deadlocks on Windows).
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            let app3 = app2.clone();
+            let _ = app2.run_on_main_thread(move || windows::open_guide(&app3));
+        });
     }
     Ok(capture.id)
 }

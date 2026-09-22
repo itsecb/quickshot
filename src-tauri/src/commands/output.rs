@@ -83,14 +83,13 @@ pub fn save_image(
     let path = if let Some(p) = header(&request, "x-path") {
         std::path::PathBuf::from(p)
     } else {
-        let format = match header(&request, "x-format") {
+        let format = match header(&request, "x-format").as_deref() {
             Some("jpeg") | Some("jpg") => settings::ImageFormat::Jpeg,
             Some("png") => settings::ImageFormat::Png,
             _ => settings.image_format,
         };
         let dir = settings::save_dir(&app, &settings)?;
         let stem = header(&request, "x-stem")
-            .map(str::to_string)
             .unwrap_or_else(|| settings::expand_pattern(&settings.file_pattern, "", "", 0, 0));
         output::unique_path(&dir, &stem, format.extension())
     };
@@ -108,8 +107,8 @@ pub fn save_image(
 pub fn export_temp_png(app: AppHandle, request: Request<'_>) -> AppResult<String> {
     let bytes = raw_body(&request)?;
     output::ensure_png(&bytes)?;
-    let stem = header(&request, "x-stem").unwrap_or("Screenshot");
-    Ok(output::temp_png(&app, &bytes, stem)?.display().to_string())
+    let stem = header(&request, "x-stem").unwrap_or_else(|| "Screenshot".into());
+    Ok(output::temp_png(&app, &bytes, &stem)?.display().to_string())
 }
 
 /// Body: PNG bytes. Headers: optional `x-x`, `x-y` physical position. Opens a pin window.
@@ -133,9 +132,9 @@ pub fn pin_image(
         rect: Rect::new(x, y, img.width(), img.height()),
         ..Default::default()
     };
-    let capture = state.insert_capture(img, source);
+    let capture = state.insert_capture(&app, img, source);
     let id = capture.id;
-    windows::open_pin(&app, &capture, x, y)?;
+    windows::open_pin_deferred(&app, capture, x, y);
     Ok(id)
 }
 

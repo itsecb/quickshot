@@ -3,9 +3,10 @@
   import { listen } from "@tauri-apps/api/event";
   import { confirm, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { guidePullSteps, type PendingStep } from "$lib/ipc";
+  import { guidePullSteps, releaseCapture, type PendingStep } from "$lib/ipc";
   import {
     deleteProject,
+    dirName,
     listProjects,
     loadProject,
     newProject,
@@ -13,6 +14,7 @@
     readStepImage,
     renameProject,
     saveProject,
+    slug,
     stepFileName,
     writeStepImage,
     type GuideProject,
@@ -84,9 +86,8 @@
 
   async function commitTitle() {
     if (!current) return;
-    const wantDir = current.project.title.trim();
-    const currentName = current.dir.split(/[\\/]/).pop()!.replace(/\.snapguide$/, "");
-    if (wantDir && wantDir !== currentName) {
+    const wantDir = slug(current.project.title);
+    if (current.project.title.trim() && wantDir !== dirName(current.dir)) {
       const newDir = await renameProject(current.dir, $state.snapshot(current.project));
       current = { dir: newDir, project: current.project };
       for (const s of current.project.steps) void loadThumb(newDir, s.image);
@@ -112,6 +113,7 @@
     if (!current) return;
     const res = await fetch(p.pngUrl, { cache: "no-store" });
     const png = new Uint8Array(await res.arrayBuffer());
+    void releaseCapture(p.id);
     const id = Math.random().toString(36).slice(2, 8);
     const image = stepFileName(current.project.steps.length, id);
     await writeStepImage(current.dir, image, png);
@@ -163,6 +165,7 @@
   onMount(() => {
     let unlisten: (() => void) | undefined;
     void (async () => {
+      unlisten = await listen("guide://step-added", () => void ingestPending());
       try {
         await refreshList();
         const first = projects[0];
@@ -171,7 +174,6 @@
       } catch (e) {
         say(String(e), true);
       }
-      unlisten = await listen("guide://step-added", () => void ingestPending());
     })();
     window.addEventListener("beforeunload", () => void flushSave());
     return () => unlisten?.();

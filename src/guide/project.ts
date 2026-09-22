@@ -28,7 +28,8 @@ export interface ProjectRef {
 
 export const isWindows = navigator.userAgent.includes("Windows");
 export const sep = isWindows ? "\\" : "/";
-export const join = (...parts: string[]) => parts.join(sep).replace(isWindows ? /\\+/g : /\/+/g, sep);
+export const join = (...parts: string[]) =>
+  parts.map((p, i) => (i ? p.replace(/^[\\/]+/, "") : p.replace(/[\\/]+$/, ""))).join(sep);
 
 export function slug(title: string): string {
   return (
@@ -85,7 +86,12 @@ export async function deleteProject(dir: string): Promise<void> {
   await fsRemove(dir);
 }
 
+export function dirName(dir: string): string {
+  return dir.split(/[\\/]/).pop()!.replace(/\.snapguide$/, "");
+}
+
 export async function renameProject(oldDir: string, project: GuideProject): Promise<string> {
+  if (slug(project.title) === dirName(oldDir)) return oldDir;
   const newDir = await projectDirFor(project.title);
   await fsMkdir(join(newDir, "captures"));
   for (const s of project.steps) await writeStepImage(newDir, s.image, await readStepImage(oldDir, s.image));

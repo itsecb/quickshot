@@ -3,6 +3,8 @@
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_notification::NotificationExt;
 
+use std::sync::Arc;
+
 use crate::error::AppResult;
 use crate::state::Capture;
 
@@ -99,6 +101,7 @@ pub fn open_pin(app: &AppHandle, capture: &Capture, x: i32, y: i32) -> AppResult
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(true)
+        .maximizable(false)
         .shadow(true)
         .visible(false)
         .inner_size(img_w as f64 / scale, img_h as f64 / scale)
@@ -109,4 +112,18 @@ pub fn open_pin(app: &AppHandle, capture: &Capture, x: i32, y: i32) -> AppResult
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
+}
+
+/// Open a pin window from a synchronous command without deadlocking on Windows:
+/// hop to a worker thread, then back onto the main thread via the event loop.
+pub fn open_pin_deferred(app: &AppHandle, capture: Arc<Capture>, x: i32, y: i32) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Err(e) = open_pin(&app2, &capture, x, y) {
+                log::error!("pin failed: {e}");
+            }
+        });
+    });
 }

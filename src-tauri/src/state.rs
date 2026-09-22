@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use image::RgbaImage;
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
 
 use crate::capture::{CaptureFrame, WindowInfo};
 use crate::commands::guide::PendingStep;
@@ -67,6 +68,14 @@ pub struct Capture {
     pub created: chrono::DateTime<chrono::Local>,
 }
 
+/// `editor-<id>` / `pin-<id>` -> id. Other labels (overlay-<monitor>) never match.
+pub fn capture_id_from_label(label: &str) -> Option<u64> {
+    let rest = label
+        .strip_prefix("editor-")
+        .or_else(|| label.strip_prefix("pin-"))?;
+    rest.parse().ok()
+}
+
 pub struct AppState {
     pub settings: RwLock<Settings>,
     pub session: Mutex<Option<CaptureSession>>,
@@ -98,19 +107,33 @@ impl AppState {
         self.settings.read().unwrap().clone()
     }
 
-    pub fn insert_capture(&self, image: RgbaImage, source: CaptureSource) -> Arc<Capture> {
+    pub fn insert_capture(
+        &self,
+        app: &AppHandle,
+        image: RgbaImage,
+        source: CaptureSource,
+    ) -> Arc<Capture> {
         let capture = Arc::new(Capture {
             id: self.next_id(),
             image,
             source,
             created: chrono::Local::now(),
         });
+        // keep memory bounded: drop the oldest captures that no editor or pin window still shows
+        let in_use: Vec<u64> = app
+            .webview_windows()
+            .keys()
+            .filter_map(|l| capture_id_from_label(l))
+            .collect();
         let mut map = self.captures.lock().unwrap();
-        // keep memory bounded: drop the oldest captures beyond a small history
         if map.len() >= 24 {
-            let mut ids: Vec<u64> = map.keys().copied().collect();
+            let mut ids: Vec<u64> = map
+                .keys()
+                .copied()
+                .filter(|id| !in_use.contains(id))
+                .collect();
             ids.sort_unstable();
-            for id in ids.into_iter().take(map.len() + 1 - 24) {
+            for id in ids.into_iter().take((map.len() + 1).saturating_sub(24)) {
                 map.remove(&id);
             }
         }

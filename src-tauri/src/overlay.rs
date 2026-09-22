@@ -2,8 +2,8 @@
 
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
+use crate::capture::MonitorInfo;
 use crate::error::AppResult;
-use crate::state::CaptureSession;
 
 pub fn label_for(monitor_id: u32) -> String {
     format!("overlay-{monitor_id}")
@@ -13,10 +13,10 @@ pub fn monitor_id_from_label(label: &str) -> Option<u32> {
     label.strip_prefix("overlay-")?.parse().ok()
 }
 
-/// Create hidden overlay windows for every frame. Must run on the main thread.
-pub fn open(app: &AppHandle, session: &mut CaptureSession) -> AppResult<()> {
-    for frame in &session.frames {
-        let m = &frame.monitor;
+/// Create hidden overlay windows for every monitor. Must run on the main thread,
+/// and the caller must not hold the session lock.
+pub fn open(app: &AppHandle, monitors: &[MonitorInfo]) -> AppResult<()> {
+    for m in monitors {
         let label = label_for(m.id);
         if let Some(stale) = app.get_webview_window(&label) {
             let _ = stale.destroy();
@@ -43,7 +43,6 @@ pub fn open(app: &AppHandle, session: &mut CaptureSession) -> AppResult<()> {
         // logical->physical conversion before the window exists uses an ambiguous DPI.
         window.set_position(PhysicalPosition::new(m.x, m.y))?;
         window.set_size(PhysicalSize::new(m.width, m.height))?;
-        session.labels.push(label);
     }
     Ok(())
 }

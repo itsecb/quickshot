@@ -114,16 +114,14 @@ pub fn run() {
             if let WindowEvent::Destroyed = event {
                 // free capture memory when its editor or pin goes away
                 let label = window.label().to_string();
-                if label.starts_with("editor-") || label.starts_with("pin-") {
-                    if let Some(id) = label.rsplit('-').next().and_then(|s| s.parse::<u64>().ok()) {
-                        let still_used = window
-                            .app_handle()
-                            .webview_windows()
-                            .keys()
-                            .any(|l| l != &label && l.ends_with(&format!("-{id}")));
-                        if !still_used {
-                            window.app_handle().state::<AppState>().remove_capture(id);
-                        }
+                if let Some(id) = state::capture_id_from_label(&label) {
+                    let still_used = window
+                        .app_handle()
+                        .webview_windows()
+                        .keys()
+                        .any(|l| l != &label && state::capture_id_from_label(l) == Some(id));
+                    if !still_used {
+                        window.app_handle().state::<AppState>().remove_capture(id);
                     }
                 }
             }

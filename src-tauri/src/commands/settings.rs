@@ -67,7 +67,7 @@ pub fn app_paths(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppPat
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_window(app: AppHandle, name: String) {
     match name.as_str() {
         "guide" => windows::open_guide(&app),

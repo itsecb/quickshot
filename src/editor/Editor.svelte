@@ -240,17 +240,39 @@
     stage?.setZoom(1);
   }
 
-  async function onDragStart(e: MouseEvent) {
-    if (e.button !== 0 || !stage) return;
+  // Native drags must start inside the mousedown, so the temp file is prepared when the
+  // pointer enters the handle and reused until the document changes.
+  let dragCache: { doc: Document; path: string; icon: string } | null = null;
+  let dragPrep: Promise<void> | null = null;
+
+  function prepareDrag() {
+    if (!stage || !history) return;
+    if (dragCache?.doc === history.current || dragPrep) return;
+    const doc = history.current;
+    dragPrep = (async () => {
+      try {
+        const canvas = stage!.render();
+        const png = await canvasToPng(canvas);
+        const path = await exportTempPng(png, stem());
+        dragCache = { doc, path, icon: canvasToDataUrl(canvas, 200) };
+      } catch (err) {
+        console.warn("drag prepare failed", err);
+      } finally {
+        dragPrep = null;
+      }
+    })();
+  }
+
+  function onDragStart(e: MouseEvent) {
+    if (e.button !== 0 || !stage || !history) return;
     e.preventDefault();
-    try {
-      const canvas = stage.render();
-      const png = await canvasToPng(canvas);
-      const path = await exportTempPng(png, stem());
-      await startDrag({ item: [path], icon: canvasToDataUrl(canvas, 200), mode: "copy" });
-    } catch (err) {
-      showToast(`Drag failed: ${err}`, true);
+    const cached = dragCache?.doc === history.current ? dragCache : null;
+    if (!cached) {
+      prepareDrag();
+      showToast("Preparing image, drag again");
+      return;
     }
+    startDrag({ item: [cached.path], icon: cached.icon, mode: "copy" }).catch((err) => showToast(`Drag failed: ${err}`, true));
   }
 
   async function closeWindow() {
@@ -407,7 +429,7 @@
       </div>
 
       <div class="group">
-        {#each palette as c, i (c)}
+        {#each palette as c, i (i)}
           <button
             class="swatch"
             class:active={style.stroke.toLowerCase() === c.toLowerCase()}
@@ -460,7 +482,7 @@
         <button class="action" onclick={doPin} title="Pin to screen (Ctrl+Shift+P)">{@html icon("pin")}</button>
         <button class="action" onclick={doOcr} title="Copy text via OCR">{@html icon("ocr")}</button>
         <button class="action" onclick={doGuide} title="Add as next step in the guide (Ctrl+E)">{@html icon("guide")} Guide</button>
-        <div class="drag-handle" role="button" tabindex="-1" onmousedown={onDragStart} title="Drag the image into Teams, Outlook, a browser or Explorer">
+        <div class="drag-handle" role="button" tabindex="-1" onmouseenter={prepareDrag} onmousedown={onDragStart} title="Drag the image into Teams, Outlook, a browser or Explorer">
           {@html icon("drag")} Drag
         </div>
       </div>

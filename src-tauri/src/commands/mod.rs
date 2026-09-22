@@ -16,11 +16,16 @@ pub fn raw_body(request: &Request<'_>) -> AppResult<Vec<u8>> {
     }
 }
 
-pub fn header<'a>(request: &'a Request<'_>, name: &str) -> Option<&'a str> {
-    request
-        .headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+/// Header values are percent-encoded by the frontend so non-ASCII paths and titles survive.
+pub fn header(request: &Request<'_>, name: &str) -> Option<String> {
+    let raw = request.headers().get(name)?.to_str().ok()?;
+    let decoded = percent_encoding::percent_decode_str(raw)
+        .decode_utf8()
+        .ok()?;
+    let trimmed = decoded.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }

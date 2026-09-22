@@ -226,7 +226,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 rect: frame.monitor.rect(),
                 ..Default::default()
             };
-            let capture = state.insert_capture(frame.image.clone(), source);
+            let capture = state.insert_capture(app, frame.image.clone(), source);
             return crate::output::after_capture(app, capture, CaptureMode::Region);
         }
         CaptureMode::RepeatLast => {
@@ -241,7 +241,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 rect,
                 ..Default::default()
             };
-            let capture = state.insert_capture(image, source);
+            let capture = state.insert_capture(app, image, source);
             return crate::output::after_capture(app, capture, CaptureMode::Region);
         }
         _ => begin_overlay(app, mode, frames),
@@ -251,27 +251,27 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
 fn begin_overlay(app: &AppHandle, mode: CaptureMode, frames: Vec<CaptureFrame>) -> AppResult<()> {
     let state = app.state::<AppState>();
     let windows = list_windows(&frames);
+    let monitors: Vec<MonitorInfo> = frames.iter().map(|f| f.monitor.clone()).collect();
+    let labels: Vec<String> = monitors.iter().map(|m| overlay::label_for(m.id)).collect();
     let session = CaptureSession {
         mode,
         frames,
         windows,
-        labels: Vec::new(),
+        labels: labels.clone(),
         ready: HashSet::new(),
         shown: false,
     };
     *state.session.lock().unwrap() = Some(session);
 
+    // The session lock must NOT be held while windows are created: on Windows the
+    // webview build pumps messages, and the first overlay's IPC needs the same lock.
     let app2 = app.clone();
     app.run_on_main_thread(move || {
-        let state = app2.state::<AppState>();
-        let mut guard = state.session.lock().unwrap();
-        if let Some(session) = guard.as_mut() {
-            if let Err(e) = overlay::open(&app2, session) {
-                log::error!("failed to open overlays: {e}");
-                let labels = session.labels.clone();
-                *guard = None;
-                overlay::close_labels(&app2, &labels);
-            }
+        if let Err(e) = overlay::open(&app2, &monitors) {
+            log::error!("failed to open overlays: {e}");
+            let state = app2.state::<AppState>();
+            state.session.lock().unwrap().take();
+            overlay::close_labels(&app2, &labels);
         }
     })?;
     Ok(())
@@ -334,7 +334,7 @@ pub fn finish(app: &AppHandle, rect: Rect, window_id: Option<u32>) -> AppResult<
     if matches!(session.mode, CaptureMode::Region | CaptureMode::Window) {
         *state.last_region.lock().unwrap() = Some(rect);
     }
-    let capture = state.insert_capture(image, source);
+    let capture = state.insert_capture(app, image, source);
     let id = capture.id;
     crate::output::after_capture(app, capture, session.mode)?;
     Ok(id)
