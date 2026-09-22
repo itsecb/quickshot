@@ -2,6 +2,7 @@ mod capture;
 mod commands;
 mod error;
 mod geom;
+mod history;
 mod hotkeys;
 mod image_util;
 mod ocr;
@@ -18,7 +19,7 @@ use tauri_plugin_autostart::MacosLauncher;
 
 use state::{AppState, CaptureMode};
 
-/// `--capture <mode>` / `--settings` / `--guides` / `--hidden`
+/// `--capture <mode>` / `--settings` / `--guides` / `--history` / `--hidden`
 fn handle_cli(app: &AppHandle, args: &[String]) {
     let mut it = args.iter();
     let mut did_something = false;
@@ -36,6 +37,10 @@ fn handle_cli(app: &AppHandle, args: &[String]) {
             }
             "--guides" => {
                 windows::open_guide(app);
+                did_something = true;
+            }
+            "--history" => {
+                windows::open_history(app);
                 did_something = true;
             }
             "--hidden" => did_something = true,
@@ -94,6 +99,8 @@ pub fn run() {
             }
             commands::settings::apply_autostart(&handle, settings.autostart);
             output::cleanup_temp(&handle);
+            let prune_handle = handle.clone();
+            std::thread::spawn(move || history::prune(&prune_handle, &settings));
 
             let args: Vec<String> = std::env::args().skip(1).collect();
             let hidden = args.iter().any(|a| a == "--hidden");
@@ -161,6 +168,14 @@ pub fn run() {
             commands::files::guides_dir,
             commands::guide::guide_push_step,
             commands::guide::guide_pull_steps,
+            commands::history::history_list,
+            commands::history::history_dir,
+            commands::history::history_open,
+            commands::history::history_pin,
+            commands::history::history_copy,
+            commands::history::history_save,
+            commands::history::history_delete,
+            commands::history::history_clear,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

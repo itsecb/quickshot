@@ -1,0 +1,165 @@
+.history {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+  font-size: 15px;
+  margin: 0 8px 0 0;
+}
+
+header input {
+  width: 280px;
+  max-width: 40vw;
+}
+
+header .spacer {
+  flex: 1;
+}
+
+.count {
+  white-space: nowrap;
+}
+
+main {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 16px 24px;
+}
+
+.empty {
+  text-align: center;
+  margin-top: 18vh;
+}
+
+section h2 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  margin: 16px 0 8px;
+  position: sticky;
+  top: -4px;
+  background: var(--bg);
+  padding: 4px 0;
+  z-index: 1;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: default;
+  outline: none;
+}
+
+.card:hover {
+  border-color: var(--fg-muted);
+}
+
+.card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.thumb {
+  position: relative;
+  height: 140px;
+  background:
+    repeating-conic-gradient(var(--bg-elev-2) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.actions {
+  position: absolute;
+  inset: auto 6px 6px 6px;
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.card:hover .actions,
+.card.selected .actions {
+  opacity: 1;
+}
+
+.actions button {
+  padding: 3px 8px;
+  font-size: 12px;
+  background: rgba(20, 22, 26, 0.88);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.actions button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.actions button.danger:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.caption {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  background: rgba(20, 22, 26, 0.94);
+  color: #fff;
+  padding: 7px 14px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast.error {
+  background: var(--danger);
+}

@@ -40,6 +40,24 @@ pub fn open_guide(app: &AppHandle) {
     }
 }
 
+pub fn open_history(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("history") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return;
+    }
+    let result = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
+        .title("QuickShot History")
+        .inner_size(1040.0, 720.0)
+        .min_inner_size(560.0, 420.0)
+        .center()
+        .build();
+    if let Err(e) = result {
+        log::error!("history window failed: {e}");
+    }
+}
+
 /// Scale factor and work area (physical) of the monitor containing a point.
 fn monitor_at(app: &AppHandle, x: i32, y: i32) -> (f64, Option<tauri::PhysicalRect<i32, u32>>) {
     match app.monitor_from_point(x as f64, y as f64) {
@@ -95,7 +113,11 @@ pub fn open_pin(app: &AppHandle, capture: &Capture, x: i32, y: i32) -> AppResult
     let label = format!("pin-{}", capture.id);
     let (img_w, img_h) = capture.image.dimensions();
     let (scale, _) = monitor_at(app, x, y);
-    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("pin.html".into()))
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("pin.html".into()));
+    // transparent so the pin's opacity (mouse wheel) shows what is underneath
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let window = builder
         .title("QuickShot Pin")
         .decorations(false)
         .always_on_top(true)

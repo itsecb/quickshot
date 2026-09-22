@@ -54,10 +54,11 @@ export interface Hotkeys {
   ocr: string;
   pin: string;
   color: string;
+  history: string;
 }
 
 export type ImageFormat = "png" | "jpeg";
-export type AfterCapture = "editor" | "copy" | "save" | "copyAndSave";
+export type AfterCapture = "editor" | "editorAndCopy" | "copy" | "save" | "copyAndSave";
 
 export interface EditorDefaults {
   strokeColor: string;
@@ -85,6 +86,9 @@ export interface Settings {
   ocrLanguage: string | null;
   guidesDir: string | null;
   editor: EditorDefaults;
+  historyEnabled: boolean;
+  historyMaxItems: number;
+  historyMaxDays: number;
 }
 
 export interface EditorInit {
@@ -96,6 +100,19 @@ export interface EditorInit {
   source: CaptureSource;
   created: string;
   settings: Settings;
+}
+
+export interface HistoryItem {
+  id: number;
+  created: string;
+  width: number;
+  height: number;
+  fileName: string;
+  source: CaptureSource;
+  thumbUrl: string;
+  pngUrl: string;
+  path: string;
+  thumbPath: string;
 }
 
 export interface PinInit {

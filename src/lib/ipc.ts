@@ -7,6 +7,7 @@ import type {
   CaptureMode,
   DirEntry,
   EditorInit,
+  HistoryItem,
   OcrOutput,
   OverlayInit,
   PinInit,
@@ -64,7 +65,7 @@ export const ocrPng = (png: Uint8Array) => invokeRaw<OcrOutput>("ocr_png", png);
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<ApplyResult>("set_settings", { settings });
 export const appPaths = () => invoke<AppPaths>("app_paths");
-export const openWindow = (name: "main" | "guide") => invoke<void>("open_window", { name });
+export const openWindow = (name: "main" | "guide" | "history") => invoke<void>("open_window", { name });
 export const hideMain = () => invoke<void>("hide_main");
 
 // ---- files ----
@@ -90,3 +91,13 @@ export interface PendingStep {
 export const guidePushStep = (png: Uint8Array, title: string) =>
   invokeRaw<number>("guide_push_step", png, { "x-title": title });
 export const guidePullSteps = () => invoke<PendingStep[]>("guide_pull_steps");
+
+// ---- history ----
+export const historyList = () => invoke<HistoryItem[]>("history_list");
+export const historyDir = () => invoke<string>("history_dir");
+export const historyOpen = (id: number) => invoke<void>("history_open", { id });
+export const historyPin = (id: number) => invoke<void>("history_pin", { id });
+export const historyCopy = (id: number) => invoke<void>("history_copy", { id });
+export const historySave = (id: number) => invoke<string>("history_save", { id });
+export const historyDelete = (ids: number[]) => invoke<void>("history_delete", { ids });
+export const historyClear = () => invoke<void>("history_clear");

@@ -16,6 +16,7 @@ pub struct Hotkeys {
     pub ocr: String,
     pub pin: String,
     pub color: String,
+    pub history: String,
 }
 
 impl Default for Hotkeys {
@@ -28,6 +29,7 @@ impl Default for Hotkeys {
             ocr: "Ctrl+Shift+O".into(),
             pin: "Ctrl+Shift+P".into(),
             color: "Ctrl+Shift+C".into(),
+            history: "Ctrl+Shift+H".into(),
         }
     }
 }
@@ -54,6 +56,7 @@ impl ImageFormat {
 pub enum AfterCapture {
     #[default]
     Editor,
+    EditorAndCopy,
     Copy,
     Save,
     CopyAndSave,
@@ -135,6 +138,12 @@ pub struct Settings {
     pub ocr_language: Option<String>,
     pub guides_dir: Option<String>,
     pub editor: EditorDefaults,
+    /// Keep every capture in the history window.
+    pub history_enabled: bool,
+    /// 0 = no limit.
+    pub history_max_items: u32,
+    /// 0 = keep forever.
+    pub history_max_days: u32,
 }
 
 impl Default for Settings {
@@ -153,6 +162,9 @@ impl Default for Settings {
             ocr_language: None,
             guides_dir: None,
             editor: EditorDefaults::default(),
+            history_enabled: true,
+            history_max_items: 500,
+            history_max_days: 30,
         }
     }
 }

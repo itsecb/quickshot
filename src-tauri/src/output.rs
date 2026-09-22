@@ -11,11 +11,14 @@ use crate::error::{AppError, AppResult};
 use crate::image_util::{encode_jpeg, encode_png_small};
 use crate::settings::{self, AfterCapture, ImageFormat, Settings};
 use crate::state::{AppState, Capture, CaptureMode, CaptureSource};
-use crate::{ocr, windows};
+use crate::{history, ocr, windows};
 
 pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) -> AppResult<()> {
     let state = app.state::<AppState>();
     let settings = state.settings();
+    if !matches!(mode, CaptureMode::Ocr | CaptureMode::Color) {
+        history::spawn_record(app, capture.clone());
+    }
     match mode {
         CaptureMode::Ocr => {
             let result = ocr::recognize(&capture.image, settings.ocr_language.as_deref());
@@ -47,7 +50,12 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
         }
         CaptureMode::Color => Ok(()),
         _ => match settings.after_capture {
-            AfterCapture::Editor => {
+            AfterCapture::Editor | AfterCapture::EditorAndCopy => {
+                if settings.after_capture == AfterCapture::EditorAndCopy {
+                    if let Err(e) = copy_to_clipboard(app, &capture.image) {
+                        log::warn!("copy after capture failed: {e}");
+                    }
+                }
                 let app2 = app.clone();
                 app.run_on_main_thread(move || {
                     if let Err(e) = windows::open_editor(&app2, &capture) {

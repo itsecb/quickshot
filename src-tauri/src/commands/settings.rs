@@ -5,7 +5,7 @@ use tauri_plugin_autostart::ManagerExt;
 use crate::error::AppResult;
 use crate::settings::{self, Settings};
 use crate::state::AppState;
-use crate::{hotkeys, tray, windows};
+use crate::{history, hotkeys, tray, windows};
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
@@ -29,6 +29,9 @@ pub fn set_settings(
     let hotkey_conflicts = hotkeys::register_all(&app, &settings);
     tray::refresh(&app, &settings);
     apply_autostart(&app, settings.autostart);
+    // apply new retention limits right away
+    let (prune_app, prune_settings) = (app.clone(), settings.clone());
+    std::thread::spawn(move || history::prune(&prune_app, &prune_settings));
     let _ = app.emit("settings://changed", &settings);
     Ok(ApplyResult { hotkey_conflicts })
 }
@@ -71,6 +74,7 @@ pub fn app_paths(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppPat
 pub fn open_window(app: AppHandle, name: String) {
     match name.as_str() {
         "guide" => windows::open_guide(&app),
+        "history" => windows::open_history(&app),
         _ => windows::show_main(&app),
     }
 }

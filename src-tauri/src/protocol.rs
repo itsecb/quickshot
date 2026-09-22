@@ -4,11 +4,14 @@
 //!   /monitor/<id>        raw RGBA of the current session frame for that monitor
 //!   /capture/<id>        raw RGBA of a finished capture
 //!   /capture/<id>.png    PNG of a finished capture (for <img> and pins)
+//!   /history/<id>.jpg    history thumbnail
+//!   /history/<id>.png    full history image
 //! Raw responses carry `x-width` / `x-height` headers.
 
 use tauri::http::{Request, Response, StatusCode};
 use tauri::{Manager, Runtime, UriSchemeContext};
 
+use crate::history;
 use crate::image_util::encode_png;
 use crate::state::AppState;
 
@@ -32,6 +35,14 @@ pub fn capture_url(id: u64) -> String {
 
 pub fn capture_png_url(id: u64) -> String {
     format!("{}/capture/{id}.png", base_url())
+}
+
+pub fn history_thumb_url(id: u64) -> String {
+    format!("{}/history/{id}.jpg", base_url())
+}
+
+pub fn history_png_url(id: u64) -> String {
+    format!("{}/history/{id}.png", base_url())
 }
 
 fn error(status: StatusCode, msg: &str) -> Response<Vec<u8>> {
@@ -64,6 +75,20 @@ fn png(body: Vec<u8>) -> Response<Vec<u8>> {
         .header("Cache-Control", "no-store")
         .body(body)
         .unwrap()
+}
+
+/// History files never change once written, so the webview may cache them.
+fn file(path: std::path::PathBuf, content_type: &str) -> Response<Vec<u8>> {
+    match std::fs::read(path) {
+        Ok(body) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Content-Type", content_type)
+            .header("Cache-Control", "max-age=31536000, immutable")
+            .body(body)
+            .unwrap(),
+        Err(_) => error(StatusCode::NOT_FOUND, "history item not found"),
+    }
 }
 
 pub fn handle<R: Runtime>(
@@ -111,6 +136,25 @@ pub fn handle<R: Runtime>(
                     capture.image.height(),
                     capture.image.as_raw().clone(),
                 )
+            }
+        }
+        "history" => {
+            // ids are parsed as numbers, so a path can never escape the history folder
+            let (id_str, thumb) = match rest.strip_suffix(".jpg") {
+                Some(id) => (id, true),
+                None => (rest.trim_end_matches(".png"), false),
+            };
+            let Ok(id) = id_str.parse::<u64>() else {
+                return error(StatusCode::BAD_REQUEST, "bad history id");
+            };
+            let path = if thumb {
+                history::thumb_path(app, id)
+            } else {
+                history::image_path(app, id)
+            };
+            match path {
+                Ok(p) => file(p, if thumb { "image/jpeg" } else { "image/png" }),
+                Err(e) => error(StatusCode::NOT_FOUND, &e.to_string()),
             }
         }
         _ => error(StatusCode::NOT_FOUND, "unknown path"),

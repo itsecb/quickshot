@@ -1,9 +1,9 @@
 use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-use crate::capture;
 use crate::settings::Settings;
 use crate::state::CaptureMode;
+use crate::{capture, windows};
 
 /// (Re)register every global hotkey from settings. Returns human-readable conflicts.
 pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
@@ -40,6 +40,18 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
         if let Err(e) = result {
             log::warn!("hotkey {accel} ({mode:?}) not registered: {e}");
             conflicts.push(format!("{accel}: {e}"));
+        }
+    }
+    let history = settings.hotkeys.history.trim();
+    if !history.is_empty() {
+        let result = gs.on_shortcut(history, |app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                windows::open_history(app);
+            }
+        });
+        if let Err(e) = result {
+            log::warn!("hotkey {history} (history) not registered: {e}");
+            conflicts.push(format!("{history}: {e}"));
         }
     }
     conflicts

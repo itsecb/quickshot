@@ -353,14 +353,20 @@ class Overlay {
 
   private drawCrosshair(p: Point) {
     const { ctx, canvas, dpr } = this;
-    ctx.strokeStyle = "rgba(255,255,255,0.75)";
-    ctx.lineWidth = dpr;
+    const x = Math.round(p.x) + 0.5;
+    const y = Math.round(p.y) + 0.5;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(0, Math.round(p.y) + 0.5);
-    ctx.lineTo(canvas.width, Math.round(p.y) + 0.5);
-    ctx.moveTo(Math.round(p.x) + 0.5, 0);
-    ctx.lineTo(Math.round(p.x) + 0.5, canvas.height);
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    // dark halo under a light line: visible on white pages and dark consoles alike
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = 3 * dpr;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = dpr;
     ctx.stroke();
   }
 

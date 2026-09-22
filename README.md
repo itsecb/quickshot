@@ -13,6 +13,12 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
   `1`–`9` colours · `[` `]` width · `Ctrl+Z` undo · `Tab` next shape · arrows nudge
 * **Share**: `Ctrl+C` copy, `Ctrl+S` save with a filename pattern, `Ctrl+Shift+S` save as,
   drag the image straight into Teams/Outlook/browser/Explorer, `Ctrl+Shift+P` pin on top of everything.
+  Optionally copy every capture to the clipboard while the editor opens.
+* **Pins**: always-on-top floating screenshots. Mouse wheel (or `↑` `↓`) changes opacity,
+  `Ctrl`+wheel zooms, double-click or `Esc` closes.
+* **History** (`Ctrl+Shift+H`): every capture is kept locally, grouped by day and searchable by app,
+  window title or date. Reopen in the editor, pin, copy, save, or drag out. Retention is configurable
+  (default 500 captures / 30 days).
 * **OCR**: copy text from any region (`Ctrl+Shift+O`) using Windows OCR / macOS Vision.
 * **Colour picker** (`Ctrl+Shift+C`) copies HEX or RGB.
 * **Guides**: press `Ctrl+E` in the editor to add the image as the next step; write the instructions and
@@ -20,7 +26,8 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 * Lives in the tray, optional autostart, all hotkeys configurable.
 
 Default global hotkeys: `Ctrl+Shift+1` region · `Ctrl+Shift+2` window · `Ctrl+Shift+3` full screen ·
-`Ctrl+Shift+4` repeat last · `Ctrl+Shift+O` OCR · `Ctrl+Shift+P` pin · `Ctrl+Shift+C` colour.
+`Ctrl+Shift+4` repeat last · `Ctrl+Shift+O` OCR · `Ctrl+Shift+P` pin · `Ctrl+Shift+C` colour ·
+`Ctrl+Shift+H` history.
 
 ## Building
 

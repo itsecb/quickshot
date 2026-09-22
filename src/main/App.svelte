@@ -31,7 +31,7 @@
     measure: "Measure",
   };
 
-  const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode }[] = [
+  const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode | "history" }[] = [
     { key: "region", label: "Capture region", mode: "region" },
     { key: "window", label: "Capture window", mode: "window" },
     { key: "fullscreen", label: "Capture full screen", mode: "fullscreen" },
@@ -39,6 +39,7 @@
     { key: "ocr", label: "Copy text (OCR)", mode: "ocr" },
     { key: "pin", label: "Pin region to screen", mode: "pin" },
     { key: "color", label: "Pick a colour", mode: "color" },
+    { key: "history", label: "Open history", mode: "history" },
   ];
 
   onMount(async () => {
@@ -91,7 +92,8 @@
     if (typeof dir === "string") settings[target] = dir;
   }
 
-  async function capture(mode: CaptureMode) {
+  async function capture(mode: CaptureMode | "history") {
+    if (mode === "history") return openWindow("history");
     await hideMain();
     setTimeout(() => void triggerCapture(mode), 150);
   }
@@ -111,6 +113,7 @@
       <button class:active={page === "editor"} onclick={() => (page = "editor")}>Editor</button>
       <button class:active={page === "about"} onclick={() => (page = "about")}>About</button>
       <div class="bottom">
+        <button onclick={() => openWindow("history")}>History…</button>
         <button onclick={() => openWindow("guide")}>Guides…</button>
         <button onclick={hideMain}>Hide to tray</button>
       </div>
@@ -183,6 +186,7 @@
           <label for="after">After a capture</label>
           <select id="after" bind:value={settings.afterCapture}>
             <option value="editor">Open the editor</option>
+            <option value="editorAndCopy">Open the editor and copy</option>
             <option value="copy">Copy to clipboard</option>
             <option value="save">Save to folder</option>
             <option value="copyAndSave">Copy and save</option>
@@ -223,6 +227,27 @@
             <input id="gdir" type="text" placeholder={paths?.guidesDir} bind:value={settings.guidesDir} />
             <button onclick={() => pickFolder("guidesDir")}>Browse…</button>
           </div>
+        </div>
+        <h3>History</h3>
+        <div class="row">
+          <label for="hist">Keep captures in history</label>
+          <div class="inline">
+            <input id="hist" type="checkbox" bind:checked={settings.historyEnabled} />
+            <button onclick={() => openWindow("history")}>Open history</button>
+          </div>
+        </div>
+        <div class="row">
+          <label for="hmax">Keep at most</label>
+          <div class="inline">
+            <input id="hmax" type="number" min="0" max="100000" bind:value={settings.historyMaxItems} style="width:90px" /> screenshots
+          </div>
+        </div>
+        <div class="row">
+          <label for="hdays">Delete after</label>
+          <div class="inline">
+            <input id="hdays" type="number" min="0" max="3650" bind:value={settings.historyMaxDays} style="width:90px" /> days
+          </div>
+          <div class="hint">0 means no limit. History is stored only on this PC, separate from your save folder.</div>
         </div>
       {:else if page === "editor"}
         <h2>Editor defaults</h2>
@@ -275,7 +300,7 @@
         <div class="row"><span>Settings file</span><span class="inline"><code>{paths?.configDir}</code><button onclick={() => paths && revealItemInDir(paths.configDir)}>Show</button></span></div>
         <div class="row"><span>Screenshots</span><span class="inline"><code>{paths?.saveDir}</code><button onclick={() => paths && openPath(paths.saveDir)}>Open</button></span></div>
         <div class="row"><span>Guides</span><span class="inline"><code>{paths?.guidesDir}</code><button onclick={() => paths && openPath(paths.guidesDir)}>Open</button></span></div>
-        <p class="muted">Command line: <code>quickshot --capture region|window|fullscreen|ocr|pin|color</code>, <code>--settings</code>, <code>--guides</code>.</p>
+        <p class="muted">Command line: <code>quickshot --capture region|window|fullscreen|ocr|pin|color</code>, <code>--settings</code>, <code>--guides</code>, <code>--history</code>.</p>
       {/if}
 
       {#if page !== "home" && page !== "about"}
