@@ -146,7 +146,7 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
             z: w.z().unwrap_or(0),
         });
     }
-    out.sort_by(|a, b| b.z.cmp(&a.z));
+    out.sort_by_key(|w| std::cmp::Reverse(w.z));
     out
 }
 
@@ -227,7 +227,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 ..Default::default()
             };
             let capture = state.insert_capture(app, frame.image.clone(), source);
-            return crate::output::after_capture(app, capture, CaptureMode::Region);
+            crate::output::after_capture(app, capture, CaptureMode::Region)
         }
         CaptureMode::RepeatLast => {
             let last = *state.last_region.lock().unwrap();
@@ -242,7 +242,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 ..Default::default()
             };
             let capture = state.insert_capture(app, image, source);
-            return crate::output::after_capture(app, capture, CaptureMode::Region);
+            crate::output::after_capture(app, capture, CaptureMode::Region)
         }
         _ => begin_overlay(app, mode, frames),
     }

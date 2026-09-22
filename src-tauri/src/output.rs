@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::{AppError, AppResult};
-use crate::image_util::{encode_jpeg, encode_png, encode_png_small};
+use crate::image_util::{encode_jpeg, encode_png_small};
 use crate::settings::{self, AfterCapture, ImageFormat, Settings};
 use crate::state::{AppState, Capture, CaptureMode, CaptureSource};
 use crate::{ocr, windows};
@@ -167,10 +167,6 @@ pub fn temp_png(app: &AppHandle, png_bytes: &[u8], stem: &str) -> AppResult<Path
         .unwrap()
         .push(path.clone());
     Ok(path)
-}
-
-pub fn temp_png_from_image(app: &AppHandle, img: &RgbaImage, stem: &str) -> AppResult<PathBuf> {
-    temp_png(app, &encode_png(img)?, stem)
 }
 
 /// Remove drag-out temp files older than a day.
