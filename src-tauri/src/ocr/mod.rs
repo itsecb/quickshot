@@ -14,6 +14,8 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+/// Only the Windows engine reports word boxes; elsewhere `OcrLine::words` stays empty.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct OcrWord {

@@ -108,3 +108,19 @@ pub fn history_set_note(app: AppHandle, id: u64, note: String) -> AppResult<()> 
     let note: String = note.trim().chars().take(2000).collect();
     history::update(&app, id, move |e| e.note = note).map(|_| ())
 }
+
+/// Copy with a context caption (see "Copy for ticket"). Returns the caption used.
+#[tauri::command(async)]
+pub fn history_copy_rich(app: AppHandle, id: u64) -> AppResult<String> {
+    let entry = history::entry(&app, id)?;
+    let png = std::fs::read(history::image_path(&app, id)?)?;
+    let image = crate::image_util::decode_png(&png)?;
+    let created = chrono::DateTime::parse_from_rfc3339(&entry.created)
+        .map(|d| d.with_timezone(&chrono::Local))
+        .unwrap_or_else(|_| chrono::Local::now());
+    let settings = app.state::<AppState>().settings();
+    let caption =
+        output::ticket_caption(&settings, &entry.source, created, entry.width, entry.height);
+    output::copy_rich(&app, &image, &png, &caption)?;
+    Ok(caption)
+}

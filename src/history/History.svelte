@@ -7,6 +7,7 @@
   import {
     historyClear,
     historyCopy,
+    historyCopyRich,
     historyDelete,
     historyDir,
     historyList,
@@ -163,6 +164,11 @@
   const edit = (item: HistoryItem) => run("", () => historyOpen(item.id));
   const pin = (item: HistoryItem) => run("", () => historyPin(item.id));
   const copy = (item: HistoryItem) => run("Copied to clipboard", () => historyCopy(item.id));
+  const copyRich = (item: HistoryItem) =>
+    run("", async () => {
+      const caption = await historyCopyRich(item.id);
+      say(caption ? `Copied with caption: ${caption}` : "Copied");
+    });
   const save = (item: HistoryItem) => run("", async () => say(`Saved ${await historySave(item.id)}`));
 
   async function remove(list: HistoryItem[]) {
@@ -256,7 +262,7 @@
       selected = new Set(filtered.map((i) => i.id));
     } else if (primaryMod(e) && k === "c" && one) {
       e.preventDefault();
-      void copy(one);
+      void (e.altKey ? copyRich(one) : copy(one));
     } else if (primaryMod(e) && k === "s" && one) {
       e.preventDefault();
       void save(one);
@@ -338,6 +344,7 @@
                     <button onclick={(e) => (e.stopPropagation(), edit(item))} title="Open in editor (Enter)">Edit</button>
                     <button onclick={(e) => (e.stopPropagation(), pin(item))} title="Pin to screen (P)">Pin</button>
                     <button onclick={(e) => (e.stopPropagation(), copy(item))} title="Copy image (Ctrl+C)">Copy</button>
+                    <button onclick={(e) => (e.stopPropagation(), copyRich(item))} title="Copy for ticket: image + caption (Ctrl+Alt+C)">Ticket</button>
                     <button onclick={(e) => (e.stopPropagation(), save(item))} title="Save to screenshots folder (Ctrl+S)">Save</button>
                     <button onclick={(e) => (e.stopPropagation(), startNote(item))} title="Add a note or #tags (N)">Note</button>
                     <button class="danger" onclick={(e) => (e.stopPropagation(), remove([item]))} title="Delete (Del)">✕</button>

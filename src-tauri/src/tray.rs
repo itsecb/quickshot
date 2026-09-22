@@ -60,6 +60,7 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
         .item(&item("capture_ocr", "Copy text (OCR)", &hk.ocr)?)
         .item(&item("capture_pin", "Pin region to screen", &hk.pin)?)
         .item(&item("capture_color", "Pick color", &hk.color)?)
+        .item(&item("capture_qr", "Read QR code / barcode", &hk.qr)?)
         .separator()
         .item(&item("open_history", "History…", &hk.history)?)
         .item(&item("open_guides", "Guides…", "")?)
@@ -89,6 +90,7 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
             "capture_ocr" => capture::trigger(app, CaptureMode::Ocr),
             "capture_pin" => capture::trigger(app, CaptureMode::Pin),
             "capture_color" => capture::trigger(app, CaptureMode::Color),
+            "capture_qr" => capture::trigger(app, CaptureMode::Qr),
             "open_history" => windows::open_history(app),
             "open_guides" => windows::open_guide(app),
             "open_settings" => windows::show_main(app),

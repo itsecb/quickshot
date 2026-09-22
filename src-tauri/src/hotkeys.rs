@@ -25,6 +25,7 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
         (settings.hotkeys.ocr.as_str(), CaptureMode::Ocr),
         (settings.hotkeys.pin.as_str(), CaptureMode::Pin),
         (settings.hotkeys.color.as_str(), CaptureMode::Color),
+        (settings.hotkeys.qr.as_str(), CaptureMode::Qr),
     ];
     let mut conflicts = Vec::new();
     for (accel, mode) in bindings {

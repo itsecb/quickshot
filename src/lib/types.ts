@@ -7,7 +7,7 @@ export interface Rect {
   height: number;
 }
 
-export type CaptureMode = "region" | "window" | "fullscreen" | "repeatLast" | "ocr" | "pin" | "color";
+export type CaptureMode = "region" | "window" | "fullscreen" | "repeatLast" | "ocr" | "pin" | "color" | "qr";
 
 export interface MonitorInfo {
   id: number;
@@ -56,6 +56,7 @@ export interface Hotkeys {
   color: string;
   history: string;
   delayedRegion: string;
+  qr: string;
 }
 
 export type ImageFormat = "png" | "jpeg";
@@ -71,6 +72,16 @@ export interface EditorDefaults {
   badgeSize: number;
   shadow: boolean;
   shortcuts: Record<string, string>;
+  beautify: Beautify;
+}
+
+export interface Beautify {
+  enabled: boolean;
+  padding: number;
+  /** preset id or #rrggbb */
+  background: string;
+  radius: number;
+  shadow: boolean;
 }
 
 export interface Settings {
@@ -92,6 +103,19 @@ export interface Settings {
   historyMaxDays: number;
   historyOcr: boolean;
   captureDelaySecs: number;
+  redactPatterns: string[];
+  ticketCaption: string;
+}
+
+export interface RedactMatch {
+  kind: string;
+  text: string;
+  rect: Rect;
+}
+
+export interface ScannedCode {
+  text: string;
+  format: string;
 }
 
 export interface EditorInit {

@@ -9,6 +9,8 @@ use crate::geom::Rect;
 use crate::image_util::decode_png;
 use crate::ocr::{self, OcrOutput};
 use crate::output;
+use crate::qr;
+use crate::redact::{self, RedactMatch};
 use crate::settings::{self, Settings};
 use crate::state::{AppState, CaptureSource};
 use crate::{protocol, windows};
@@ -238,4 +240,57 @@ pub fn ocr_png(state: State<'_, AppState>, request: Request<'_>) -> AppResult<Oc
     let bytes = raw_body(&request)?;
     let img = decode_png(&bytes)?;
     ocr::recognize(&img, state.settings().ocr_language.as_deref())
+}
+
+/// OCR the original capture and return everything that looks sensitive, in image pixels
+/// (the editor's shape coordinates), for one-key redaction.
+#[tauri::command]
+pub async fn redact_capture(app: AppHandle, id: u64) -> AppResult<Vec<RedactMatch>> {
+    let state = app.state::<AppState>();
+    let capture = state
+        .capture(id)
+        .ok_or_else(|| AppError::NotFound("capture expired".into()))?;
+    let settings = state.settings();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<RedactMatch>> {
+        let out = ocr::recognize(&capture.image, settings.ocr_language.as_deref())?;
+        Ok(redact::find_sensitive(
+            &out.lines,
+            &settings.redact_patterns,
+        ))
+    })
+    .await
+    .map_err(|e| AppError::Ocr(e.to_string()))?
+}
+
+/// QR codes and barcodes in the original capture.
+#[tauri::command]
+pub async fn scan_codes(app: AppHandle, id: u64) -> AppResult<Vec<qr::Code>> {
+    let capture = app
+        .state::<AppState>()
+        .capture(id)
+        .ok_or_else(|| AppError::NotFound("capture expired".into()))?;
+    tauri::async_runtime::spawn_blocking(move || qr::decode(&capture.image))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Body: PNG rendered by the editor. Header `x-id`: capture id, for the caption's context.
+#[tauri::command]
+pub fn copy_image_rich(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: Request<'_>,
+) -> AppResult<String> {
+    let bytes = raw_body(&request)?;
+    output::ensure_png(&bytes)?;
+    let img = decode_png(&bytes)?;
+    let settings = state.settings();
+    let (source, created) = header(&request, "x-id")
+        .and_then(|v| v.parse::<u64>().ok())
+        .and_then(|id| state.capture(id))
+        .map(|c| (c.source.clone(), c.created))
+        .unwrap_or_else(|| (CaptureSource::default(), chrono::Local::now()));
+    let caption = output::ticket_caption(&settings, &source, created, img.width(), img.height());
+    output::copy_rich(&app, &img, &bytes, &caption)?;
+    Ok(caption)
 }

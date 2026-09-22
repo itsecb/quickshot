@@ -1,6 +1,7 @@
 // Konva stage: renders a Document, handles selection, drawing tools, zoom and export.
 import Konva from "konva";
-import type { Rect } from "$lib/types";
+import type { Beautify, Rect } from "$lib/types";
+import { beautify } from "./beautify";
 import { rectFromPoints, rectIntersect, rectRound } from "$lib/geometry";
 import {
   addShape,
@@ -9,6 +10,7 @@ import {
   nextBadgeNumber,
   removeShape,
   updateShape,
+  withShapes,
   type ArrowShape,
   type BlurShape,
   type Document,
@@ -292,6 +294,12 @@ export class EditorStage {
     } else {
       this.refreshSelection();
     }
+  }
+
+  /** Add many shapes as one undoable step (e.g. auto-redaction). */
+  addShapes(shapes: Shape[]) {
+    if (!shapes.length) return;
+    this.commit(withShapes(this.doc, [...this.doc.shapes, ...shapes]));
   }
 
   private commit(doc: Document) {
@@ -927,8 +935,16 @@ export class EditorStage {
   }
 
   // ---------- export ----------
-  render(): HTMLCanvasElement {
-    return renderDocument(this.doc, this.image);
+  private beautifyOptions: Beautify | null = null;
+
+  setBeautify(options: Beautify | null) {
+    this.beautifyOptions = options;
+  }
+
+  /** Final image. `raw` skips the beautify backdrop (for OCR and code scanning). */
+  render(raw = false): HTMLCanvasElement {
+    const canvas = renderDocument(this.doc, this.image);
+    return raw || !this.beautifyOptions?.enabled ? canvas : beautify(canvas, this.beautifyOptions);
   }
 
   destroy() {

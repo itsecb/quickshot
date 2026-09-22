@@ -22,6 +22,10 @@ export const icons: Record<string, string> = {
   drag: '<path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/>',
   fit: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
   clear: '<path d="M6 6l12 12M18 6L6 18"/>',
+  redact: '<rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M6 12h.01M9 12h.01M12 12h.01M15 12h.01M18 12h.01"/>',
+  beautify: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M3 3h18v18H3z" opacity=".5"/>',
+  qr: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2"/>',
+  ticket: '<path d="M4 7h16v4a2 2 0 000 2v4H4v-4a2 2 0 000-4z"/><path d="M9 10h6M9 14h4"/>',
 };
 
 export function icon(name: string): string {

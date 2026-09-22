@@ -40,6 +40,7 @@
     { key: "ocr", label: "Copy text (OCR)", mode: "ocr" },
     { key: "pin", label: "Pin region to screen", mode: "pin" },
     { key: "color", label: "Pick a colour", mode: "color" },
+    { key: "qr", label: "Read QR code / barcode", mode: "qr" },
     { key: "history", label: "Open history", mode: "history" },
   ];
 
@@ -235,6 +236,29 @@
           <div class="inline">
             <input id="gdir" type="text" placeholder={paths?.guidesDir} bind:value={settings.guidesDir} />
             <button onclick={() => pickFolder("guidesDir")}>Browse…</button>
+          </div>
+        </div>
+        <h3>Sharing</h3>
+        <div class="row">
+          <label for="caption">"Copy for ticket" caption</label>
+          <input id="caption" type="text" bind:value={settings.ticketCaption} />
+          <div class="hint">
+            <kbd>Ctrl+Alt+C</kbd> in the editor copies the image with this caption above it. Tokens: <code>{"{title}"}</code> <code>{"{app}"}</code> <code>{"{datetime}"}</code>
+            <code>{"{date}"}</code> <code>{"{time}"}</code> <code>{"{host}"}</code> <code>{"{user}"}</code> <code>{"{w}"}</code> <code>{"{h}"}</code>. Empty parts are left out.
+          </div>
+        </div>
+        <div class="row">
+          <label for="redact">Also redact</label>
+          <textarea
+            id="redact"
+            rows="3"
+            placeholder={"one per line, e.g.\ncontoso.com\nSRV-\nre:INC\\d{6}"}
+            value={settings.redactPatterns.join("\n")}
+            oninput={(e) => settings && (settings.redactPatterns = (e.currentTarget as HTMLTextAreaElement).value.split("\n").map((l) => l.trim()).filter(Boolean))}
+          ></textarea>
+          <div class="hint">
+            Redact (<kbd>Ctrl+Shift+X</kbd> in the editor) always finds IPs, MACs, emails, GUIDs, SIDs, internal hostnames and passwords/keys/tokens.
+            Add your domains or server prefixes here (the whole word containing them is hidden), or <code>re:</code> + a regular expression.
           </div>
         </div>
         <h3>History</h3>

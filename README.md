@@ -22,6 +22,13 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
   (default 500 captures / 30 days; starred are exempt).
 * **Delayed capture** (`Ctrl+Shift+5`, or tray: 3/5/10 s): time to open hover and right-click menus.
   The countdown never takes focus and is gone before the screen is captured.
+* **Auto-redact** (`Ctrl+Shift+X` in the editor): finds IPs, MACs, emails, GUIDs, SIDs, internal
+  hostnames, passwords/keys/tokens (plus your own domains or patterns) and pixelates them in one
+  undoable step.
+* **Copy for ticket** (`Ctrl+Alt+C`): image plus a caption (window, app, time, PC) as rich clipboard
+  content that pastes into ServiceNow, Jira, Teams, Outlook and email.
+* **Beautify** (`Ctrl+B`): backdrop, padding, rounded corners and shadow for docs and slides.
+* **QR codes & barcodes** (`Ctrl+Shift+Q`): select one on screen and its contents are copied.
 * **OCR**: copy text from any region (`Ctrl+Shift+O`) using Windows OCR / macOS Vision.
 * **Colour picker** (`Ctrl+Shift+C`) copies HEX or RGB.
 * **Guides**: press `Ctrl+E` in the editor to add the image as the next step; write the instructions and
@@ -30,7 +37,7 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 
 Default global hotkeys: `Ctrl+Shift+1` region · `Ctrl+Shift+2` window · `Ctrl+Shift+3` full screen ·
 `Ctrl+Shift+4` repeat last · `Ctrl+Shift+O` OCR · `Ctrl+Shift+P` pin · `Ctrl+Shift+C` colour ·
-`Ctrl+Shift+H` history · `Ctrl+Shift+5` delayed region.
+`Ctrl+Shift+H` history · `Ctrl+Shift+5` delayed region · `Ctrl+Shift+Q` QR/barcode.
 
 ## Building
 
@@ -53,7 +60,7 @@ npm run check            # svelte-check
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Command line: `quickshot --capture region|window|fullscreen|ocr|pin|color [--delay N]`, `--settings`, `--guides`, `--history`, `--hidden`.
+Command line: `quickshot --capture region|window|fullscreen|ocr|pin|color|qr [--delay N]`, `--settings`, `--guides`, `--history`, `--hidden`.
 
 ## Releases
 

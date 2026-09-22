@@ -209,3 +209,70 @@
   height: 100vh;
   color: var(--fg-muted);
 }
+
+.action.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.popover-anchor {
+  position: relative;
+}
+
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 21;
+  width: 290px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.popover .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.popover .row input[type="range"] {
+  flex: 1;
+}
+
+.popover .preview {
+  align-self: center;
+  max-width: 260px;
+  max-height: 150px;
+  border-radius: 4px;
+  background: repeating-conic-gradient(var(--bg-elev-2) 0% 25%, transparent 0% 50%) 50% / 12px 12px;
+}
+
+.swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bg-swatch {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border-radius: 5px;
+  border: 2px solid transparent;
+}
+
+.bg-swatch.active {
+  border-color: var(--fg);
+}

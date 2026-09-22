@@ -12,6 +12,8 @@ import type {
   OverlayInit,
   PinInit,
   Rect,
+  RedactMatch,
+  ScannedCode,
   Settings,
 } from "./types";
 
@@ -61,6 +63,11 @@ export const copyCapture = (id: number, rect?: Rect) => invoke<void>("copy_captu
 export const saveCapture = (id: number) => invoke<string>("save_capture", { id });
 export const ocrCapture = (id: number, rect?: Rect) => invoke<OcrOutput>("ocr_capture", { id, rect: rect ?? null });
 export const ocrPng = (png: Uint8Array) => invokeRaw<OcrOutput>("ocr_png", png);
+export const redactCapture = (id: number) => invoke<RedactMatch[]>("redact_capture", { id });
+export const scanCodes = (id: number) => invoke<ScannedCode[]>("scan_codes", { id });
+/** Copies image + caption (rich clipboard). Returns the caption used. */
+export const copyImageRich = (png: Uint8Array, id: number) =>
+  invokeRaw<string>("copy_image_rich", png, { "x-id": String(id) });
 
 // ---- settings ----
 export const getSettings = () => invoke<Settings>("get_settings");
@@ -103,4 +110,5 @@ export const historySave = (id: number) => invoke<string>("history_save", { id }
 export const historyDelete = (ids: number[]) => invoke<void>("history_delete", { ids });
 export const historyClear = () => invoke<void>("history_clear");
 export const historySetStar = (id: number, starred: boolean) => invoke<void>("history_set_star", { id, starred });
+export const historyCopyRich = (id: number) => invoke<string>("history_copy_rich", { id });
 export const historySetNote = (id: number, note: string) => invoke<void>("history_set_note", { id, note });

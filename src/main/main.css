@@ -181,3 +181,12 @@ code {
   padding: 1px 4px;
   border-radius: 4px;
 }
+
+.row textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
+}

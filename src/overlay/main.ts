@@ -62,6 +62,8 @@ class Overlay {
         return "Select a region to pin · Esc cancels";
       case "color":
         return "Click to copy HEX · Shift+click for RGB · Esc cancels";
+      case "qr":
+        return "Select a QR code or barcode to copy its contents · Esc cancels";
       default:
         return "Drag a region · click a window · Enter = whole screen · Esc cancels";
     }

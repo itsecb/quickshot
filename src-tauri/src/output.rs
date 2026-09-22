@@ -11,12 +11,15 @@ use crate::error::{AppError, AppResult};
 use crate::image_util::{encode_jpeg, encode_png_small};
 use crate::settings::{self, AfterCapture, ImageFormat, Settings};
 use crate::state::{AppState, Capture, CaptureMode, CaptureSource};
-use crate::{history, ocr, windows};
+use crate::{history, ocr, qr, ticket, windows};
 
 pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) -> AppResult<()> {
     let state = app.state::<AppState>();
     let settings = state.settings();
-    if !matches!(mode, CaptureMode::Ocr | CaptureMode::Color) {
+    if !matches!(
+        mode,
+        CaptureMode::Ocr | CaptureMode::Color | CaptureMode::Qr
+    ) {
         history::spawn_record(app, capture.clone());
     }
     match mode {
@@ -49,6 +52,36 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
             Ok(())
         }
         CaptureMode::Color => Ok(()),
+        CaptureMode::Qr => {
+            let codes = qr::decode(&capture.image);
+            state.remove_capture(capture.id);
+            match codes.as_slice() {
+                [] => windows::toast(
+                    app,
+                    "No code found",
+                    "No QR code or barcode was found in the selection.",
+                ),
+                [one] => {
+                    app.clipboard().write_text(one.text.clone())?;
+                    let preview: String = one.text.chars().take(80).collect();
+                    windows::toast(app, &format!("Copied {}", one.format), &preview);
+                }
+                many => {
+                    let text = many
+                        .iter()
+                        .map(|c| c.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    app.clipboard().write_text(text)?;
+                    windows::toast(
+                        app,
+                        &format!("Copied {} codes", many.len()),
+                        "One per line.",
+                    );
+                }
+            }
+            Ok(())
+        }
         _ => match settings.after_capture {
             AfterCapture::Editor | AfterCapture::EditorAndCopy => {
                 if settings.after_capture == AfterCapture::EditorAndCopy {
@@ -91,6 +124,67 @@ pub fn copy_to_clipboard(app: &AppHandle, img: &RgbaImage) -> AppResult<()> {
     let image = tauri::image::Image::new(img.as_raw(), img.width(), img.height());
     app.clipboard().write_image(&image)?;
     Ok(())
+}
+
+/// Copy the image with a context caption for tickets and chats: PNG + bitmap + HTML
+/// (caption above an embedded image) + plain-text caption, all in one clipboard write so
+/// each app picks the richest format it understands.
+pub fn copy_rich(app: &AppHandle, img: &RgbaImage, png: &[u8], caption: &str) -> AppResult<()> {
+    let html = ticket::html(caption, png);
+    #[cfg(windows)]
+    {
+        let _ = app;
+        copy_rich_windows(img, png, caption, &html)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (img, png);
+        app.clipboard()
+            .write_html(html, Some(caption.to_string()))?;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn copy_rich_windows(img: &RgbaImage, png: &[u8], caption: &str, html: &str) -> AppResult<()> {
+    use clipboard_win::options::NoClear;
+    use clipboard_win::{formats, raw, Clipboard};
+    let err = |e: clipboard_win::ErrorCode| AppError::Other(format!("clipboard: {e}"));
+    let _open = Clipboard::new_attempts(10).map_err(err)?;
+    raw::empty().map_err(err)?;
+    if let Some(png_format) = raw::register_format("PNG") {
+        raw::set_without_clear(png_format.get(), png).map_err(err)?;
+    }
+    raw::set_without_clear(formats::CF_DIB, &ticket::dib(img)).map_err(err)?;
+    if let Some(html_format) = raw::register_format("HTML Format") {
+        raw::set_html_with(html_format.get(), html, NoClear).map_err(err)?;
+    }
+    if !caption.is_empty() {
+        raw::set_string_with(caption, NoClear).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Caption for a capture from the configured template.
+pub fn ticket_caption(
+    settings: &Settings,
+    source: &CaptureSource,
+    created: chrono::DateTime<chrono::Local>,
+    width: u32,
+    height: u32,
+) -> String {
+    ticket::expand_caption(
+        &settings.ticket_caption,
+        &ticket::CaptionInfo {
+            title: &source.title,
+            app: &source.app_name,
+            created,
+            width,
+            height,
+        },
+        &ticket::host_name(),
+        &ticket::user_name(),
+    )
 }
 
 /// Pick a unique path in `dir` for `stem.ext`, appending " (2)", " (3)" … on collision.

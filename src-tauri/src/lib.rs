@@ -9,8 +9,11 @@ mod ocr;
 mod output;
 mod overlay;
 mod protocol;
+mod qr;
+mod redact;
 mod settings;
 mod state;
+mod ticket;
 mod tray;
 mod windows;
 
@@ -161,6 +164,9 @@ pub fn run() {
             commands::output::capture_pixels,
             commands::output::ocr_capture,
             commands::output::ocr_png,
+            commands::output::redact_capture,
+            commands::output::scan_codes,
+            commands::output::copy_image_rich,
             commands::settings::get_settings,
             commands::settings::set_settings,
             commands::settings::app_paths,
@@ -187,6 +193,7 @@ pub fn run() {
             commands::history::history_clear,
             commands::history::history_set_star,
             commands::history::history_set_note,
+            commands::history::history_copy_rich,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

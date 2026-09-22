@@ -18,6 +18,7 @@ pub struct Hotkeys {
     pub color: String,
     pub history: String,
     pub delayed_region: String,
+    pub qr: String,
 }
 
 impl Default for Hotkeys {
@@ -32,6 +33,7 @@ impl Default for Hotkeys {
             color: "Ctrl+Shift+C".into(),
             history: "Ctrl+Shift+H".into(),
             delayed_region: "Ctrl+Shift+5".into(),
+            qr: "Ctrl+Shift+Q".into(),
         }
     }
 }
@@ -77,6 +79,31 @@ pub struct EditorDefaults {
     pub shadow: bool,
     /// tool id -> key (single character or key name), e.g. "arrow" -> "a"
     pub shortcuts: BTreeMap<String, String>,
+    pub beautify: Beautify,
+}
+
+/// Backdrop applied around the image on export (copy, save, drag, pin, guide).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Beautify {
+    pub enabled: bool,
+    pub padding: u32,
+    /// Preset id (see the editor's beautify presets) or a #rrggbb colour.
+    pub background: String,
+    pub radius: u32,
+    pub shadow: bool,
+}
+
+impl Default for Beautify {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            padding: 48,
+            background: "ocean".into(),
+            radius: 10,
+            shadow: true,
+        }
+    }
 }
 
 impl Default for EditorDefaults {
@@ -118,6 +145,7 @@ impl Default for EditorDefaults {
             badge_size: 28,
             shadow: true,
             shortcuts,
+            beautify: Beautify::default(),
         }
     }
 }
@@ -150,6 +178,10 @@ pub struct Settings {
     pub history_ocr: bool,
     /// Countdown for the delayed-capture hotkey.
     pub capture_delay_secs: u32,
+    /// Extra things to auto-redact: literals (hide the whole word containing them) or `re:<regex>`.
+    pub redact_patterns: Vec<String>,
+    /// Caption for "Copy for ticket". Tokens: {title} {app} {date} {time} {datetime} {host} {user} {w} {h}
+    pub ticket_caption: String,
 }
 
 impl Default for Settings {
@@ -173,6 +205,8 @@ impl Default for Settings {
             history_max_days: 30,
             history_ocr: true,
             capture_delay_secs: 3,
+            redact_patterns: Vec::new(),
+            ticket_caption: "{title} — {app} · {datetime} · {host}".into(),
         }
     }
 }

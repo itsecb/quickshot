@@ -5,19 +5,25 @@
   import { startDrag } from "@crabnebula/tauri-plugin-drag";
   import {
     copyImage,
+    copyImageRich,
     copyText,
     currentLabel,
     editorInit,
     exportTempPng,
+    getSettings,
     guidePushStep,
     ocrPng,
     pinImage,
+    redactCapture,
     saveImage,
+    scanCodes,
+    setSettings,
   } from "$lib/ipc";
   import { canvasToDataUrl, canvasToPng, fetchRawToCanvas } from "$lib/image";
   import { isTypingTarget, primaryMod } from "$lib/keys";
-  import type { EditorInit } from "$lib/types";
-  import { emptyDocument, type Document, type ToolId } from "./document";
+  import type { Beautify, EditorInit } from "$lib/types";
+  import { emptyDocument, newId, type BlurShape, type Document, type ToolId } from "./document";
+  import { BACKGROUNDS, backgroundCss } from "./beautify";
   import { History } from "./history";
   import { EditorStage, type Style } from "./stage";
   import { icon } from "./icons";
@@ -65,6 +71,9 @@
   let selectedId = $state<string | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let beautifyOpts = $state<Beautify>({ enabled: false, padding: 48, background: "ocean", radius: 10, shadow: true });
+  let showBeautify = $state(false);
+  let previewCanvas = $state<HTMLCanvasElement | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   const win = getCurrentWindow();
@@ -102,6 +111,7 @@
       };
       palette = s.palette;
       shortcuts = s.shortcuts;
+      if (s.beautify) beautifyOpts = s.beautify;
       const image = await fetchRawToCanvas(init.frameUrl);
       const doc: Document = emptyDocument(image.width, image.height);
       history = new History(doc);
@@ -116,6 +126,7 @@
         onStatus: (t) => (status = t),
         onZoom: (z) => (zoom = z),
       });
+      stage.setBeautify($state.snapshot(beautifyOpts));
       stage.setTool("arrow");
       tool = "arrow";
       syncHistoryFlags();
@@ -156,9 +167,10 @@
     syncHistoryFlags();
   }
 
-  async function renderPng(): Promise<Uint8Array> {
+  /** `raw` = without the beautify backdrop (for OCR). */
+  async function renderPng(raw = false): Promise<Uint8Array> {
     if (!stage) throw new Error("not ready");
-    return canvasToPng(stage.render());
+    return canvasToPng(stage.render(raw));
   }
 
   function stem(): string {
@@ -220,11 +232,105 @@
   const doOcr = () =>
     guarded("OCR", async () => {
       showToast("Recognising text…");
-      const out = await ocrPng(await renderPng());
+      const out = await ocrPng(await renderPng(true));
       if (!out.text.trim()) return showToast("No text found", true);
       await copyText(out.text);
       showToast(`Copied ${out.text.length} characters of text`);
     });
+
+  const doCopyRich = () =>
+    guarded("Copy for ticket", async () => {
+      const caption = await copyImageRich(await renderPng(), init!.id);
+      dirty = false;
+      showToast(caption ? `Copied with caption: ${caption}` : "Copied");
+    });
+
+  const REDACT_LABELS: Record<string, string> = { IP: "IP", IPv6: "IPv6", email: "email", hostname: "hostname" };
+
+  const doRedact = () =>
+    guarded("Redact", async () => {
+      if (!stage || !init) return;
+      showToast("Looking for sensitive text…");
+      const hits = await redactCapture(init.id);
+      if (!hits.length) return showToast("Nothing sensitive found");
+      const shapes: BlurShape[] = hits.map((h) => ({
+        id: newId(),
+        type: "blur",
+        x: h.rect.x,
+        y: h.rect.y,
+        width: h.rect.width,
+        height: h.rect.height,
+        mode: "pixelate",
+        amount: Math.max(8, style.blurAmount),
+        stroke: style.stroke,
+        strokeWidth: 0,
+        opacity: 1,
+        shadow: false,
+      }));
+      stage.addShapes(shapes);
+      const counts = new Map<string, number>();
+      for (const h of hits) counts.set(h.kind, (counts.get(h.kind) ?? 0) + 1);
+      const summary = [...counts].map(([k, n]) => `${n} ${REDACT_LABELS[k] ?? k}`).join(", ");
+      showToast(`Redacted ${hits.length} (${summary}). Review them; Ctrl+Z undoes`);
+    });
+
+  const doScan = () =>
+    guarded("Scan", async () => {
+      if (!init) return;
+      const codes = await scanCodes(init.id);
+      if (!codes.length) return showToast("No QR code or barcode found", true);
+      await copyText(codes.map((c) => c.text).join("\n"));
+      const first = codes[0]!.text;
+      showToast(codes.length > 1 ? `Copied ${codes.length} codes` : `Copied: ${first.length > 60 ? first.slice(0, 60) + "…" : first}`);
+    });
+
+  // ---- beautify ----
+  function applyBeautify() {
+    stage?.setBeautify($state.snapshot(beautifyOpts));
+    dragCache = null; // the drag image includes the backdrop
+    drawPreview();
+  }
+
+  function drawPreview() {
+    if (!stage || !previewCanvas) return;
+    const full = stage.render();
+    const scale = Math.min(1, 260 / full.width, 150 / full.height);
+    previewCanvas.width = Math.max(1, Math.round(full.width * scale));
+    previewCanvas.height = Math.max(1, Math.round(full.height * scale));
+    const ctx = previewCanvas.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(full, 0, 0, previewCanvas.width, previewCanvas.height);
+  }
+
+  /** Remember the look for next time (only when the panel closes, to avoid churn). */
+  async function persistBeautify() {
+    try {
+      const s = await getSettings();
+      s.editor.beautify = $state.snapshot(beautifyOpts);
+      await setSettings(s);
+    } catch (e) {
+      console.warn("could not save beautify settings", e);
+    }
+  }
+
+  function toggleBeautify() {
+    beautifyOpts.enabled = !beautifyOpts.enabled;
+    applyBeautify();
+    void persistBeautify();
+    showToast(beautifyOpts.enabled ? "Beautify on: copy, save, drag and pin include the backdrop" : "Beautify off");
+  }
+
+  function openBeautify() {
+    showBeautify = !showBeautify;
+    if (showBeautify) requestAnimationFrame(drawPreview);
+    else void persistBeautify();
+  }
+
+  function closeBeautify() {
+    if (!showBeautify) return;
+    showBeautify = false;
+    void persistBeautify();
+  }
 
   const doGuide = () =>
     guarded("Add to guide", async () => {
@@ -297,7 +403,17 @@
           return;
         case "c":
           e.preventDefault();
-          void doCopy();
+          void (e.altKey ? doCopyRich() : doCopy());
+          return;
+        case "b":
+          e.preventDefault();
+          toggleBeautify();
+          return;
+        case "x":
+          if (e.shiftKey) {
+            e.preventDefault();
+            void doRedact();
+          }
           return;
         case "s":
           e.preventDefault();
@@ -348,7 +464,9 @@
     switch (e.key) {
       case "Escape":
         e.preventDefault();
-        if (stage.selectedId) {
+        if (showBeautify) {
+          closeBeautify();
+        } else if (stage.selectedId) {
           stage.select(null);
         } else if (tool !== "select") {
           setTool("select");
@@ -477,7 +595,43 @@
       </div>
 
       <div class="group">
+        <button class="action" onclick={doRedact} title="Auto-redact IPs, emails, hostnames, secrets… (Ctrl+Shift+X)">{@html icon("redact")} Redact</button>
+        <div class="popover-anchor">
+          <button
+            class="action"
+            class:on={beautifyOpts.enabled}
+            onclick={openBeautify}
+            title="Backdrop, padding, rounded corners, shadow (Ctrl+B toggles)">{@html icon("beautify")} Beautify</button
+          >
+          {#if showBeautify}
+            <div class="popover-backdrop" role="presentation" onclick={closeBeautify}></div>
+            <div class="popover">
+              <label class="row"><input type="checkbox" bind:checked={beautifyOpts.enabled} onchange={applyBeautify} /> Apply to exports</label>
+              <canvas class="preview" bind:this={previewCanvas}></canvas>
+              <div class="swatches">
+                {#each BACKGROUNDS as b (b.id)}
+                  <button
+                    class="bg-swatch"
+                    class:active={beautifyOpts.background === b.id}
+                    style={`background:${backgroundCss(b.id)}`}
+                    title={b.label}
+                    aria-label={b.label}
+                    onclick={() => ((beautifyOpts.background = b.id), (beautifyOpts.enabled = true), applyBeautify())}
+                  ></button>
+                {/each}
+              </div>
+              <label class="row">Padding <input type="range" min="0" max="160" bind:value={beautifyOpts.padding} oninput={applyBeautify} /> <span>{beautifyOpts.padding}</span></label>
+              <label class="row">Corners <input type="range" min="0" max="40" bind:value={beautifyOpts.radius} oninput={applyBeautify} /> <span>{beautifyOpts.radius}</span></label>
+              <label class="row"><input type="checkbox" bind:checked={beautifyOpts.shadow} onchange={applyBeautify} /> Shadow</label>
+            </div>
+          {/if}
+        </div>
+        <button class="action" onclick={doScan} title="Read QR codes / barcodes in the capture">{@html icon("qr")}</button>
+      </div>
+
+      <div class="group">
         <button class="action primary" onclick={doCopy} title="Copy to clipboard (Ctrl+C)">{@html icon("copy")} Copy</button>
+        <button class="action" onclick={doCopyRich} title="Copy for ticket: image + caption with window, time and PC (Ctrl+Alt+C)">{@html icon("ticket")}</button>
         <button class="action" onclick={doSave} title="Save to folder (Ctrl+S) · Save as (Ctrl+Shift+S)">{@html icon("save")} Save</button>
         <button class="action" onclick={doPin} title="Pin to screen (Ctrl+Shift+P)">{@html icon("pin")}</button>
         <button class="action" onclick={doOcr} title="Copy text via OCR">{@html icon("ocr")}</button>

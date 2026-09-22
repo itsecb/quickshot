@@ -1,6 +1,6 @@
 [package]
 name = "quickshot"
-version = "0.3.0"
+version = "0.4.0"
 description = "Fast, lightweight screenshot capture, markup and guide builder"
 authors = ["ecbrown75"]
 edition = "2021"
@@ -31,9 +31,24 @@ thiserror = "2"
 log = "0.4"
 chrono = "0.4"
 percent-encoding = "2"
+regex = "1"
+base64 = "0.22"
+# barcode/QR decoding only (no image I/O, encoders or client parsers)
+rxing = { version = "0.9", default-features = false, features = [
+  "decoders",
+  "multi_barcode_readers",
+  "encoding_rs",
+  "qrcode",
+  "datamatrix",
+  "oned",
+  "pdf417",
+  "aztec",
+] }
 
 [target.'cfg(windows)'.dependencies]
 xcap = { version = "0.9", features = ["wgc"] }
+# multi-format clipboard writes (image + HTML + text in one go) for "copy for ticket"
+clipboard-win = "5"
 windows = { version = "0.62", features = [
   "Media_Ocr",
   "Graphics_Imaging",
