@@ -48,6 +48,7 @@ pub fn decode_png(bytes: &[u8]) -> AppResult<RgbaImage> {
     Ok(image::load_from_memory(bytes)?.to_rgba8())
 }
 
+#[cfg(windows)]
 pub fn rgba_to_bgra(img: &RgbaImage) -> Vec<u8> {
     let mut out = img.as_raw().clone();
     for px in out.chunks_exact_mut(4) {
