@@ -17,6 +17,7 @@ pub struct Hotkeys {
     pub pin: String,
     pub color: String,
     pub history: String,
+    pub delayed_region: String,
 }
 
 impl Default for Hotkeys {
@@ -30,6 +31,7 @@ impl Default for Hotkeys {
             pin: "Ctrl+Shift+P".into(),
             color: "Ctrl+Shift+C".into(),
             history: "Ctrl+Shift+H".into(),
+            delayed_region: "Ctrl+Shift+5".into(),
         }
     }
 }
@@ -144,6 +146,10 @@ pub struct Settings {
     pub history_max_items: u32,
     /// 0 = keep forever.
     pub history_max_days: u32,
+    /// Read the text of every history capture in the background so it is searchable.
+    pub history_ocr: bool,
+    /// Countdown for the delayed-capture hotkey.
+    pub capture_delay_secs: u32,
 }
 
 impl Default for Settings {
@@ -165,6 +171,8 @@ impl Default for Settings {
             history_enabled: true,
             history_max_items: 500,
             history_max_days: 30,
+            history_ocr: true,
+            capture_delay_secs: 3,
         }
     }
 }

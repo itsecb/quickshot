@@ -58,6 +58,49 @@ pub fn open_history(app: &AppHandle) {
     }
 }
 
+pub const COUNTDOWN_LABEL: &str = "countdown";
+
+/// Small always-on-top countdown in the corner of the cursor's monitor. It never takes focus,
+/// so hover and right-click menus the user is setting up stay open.
+pub fn open_countdown(app: &AppHandle, secs: u32) -> AppResult<()> {
+    if let Some(w) = app.get_webview_window(COUNTDOWN_LABEL) {
+        let _ = w.destroy();
+    }
+    let (w, h) = (176.0, 64.0);
+    let (cx, cy) = app
+        .cursor_position()
+        .map(|p| (p.x as i32, p.y as i32))
+        .unwrap_or((0, 0));
+    let (scale, work) = monitor_at(app, cx, cy);
+    let builder = WebviewWindowBuilder::new(
+        app,
+        COUNTDOWN_LABEL,
+        WebviewUrl::App("countdown.html".into()),
+    )
+    .title("QuickShot countdown")
+    .initialization_script(format!("window.__QS_COUNTDOWN = {secs};"))
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .focused(false)
+    .focusable(false)
+    .visible(false)
+    .inner_size(w, h);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let window = builder.build()?;
+    if let Some(area) = work {
+        let margin = 24.0 * scale;
+        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
+        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
+        let _ = window.set_position(PhysicalPosition::new(px, py));
+    }
+    let _ = window.show();
+    Ok(())
+}
+
 /// Scale factor and work area (physical) of the monitor containing a point.
 fn monitor_at(app: &AppHandle, x: i32, y: i32) -> (f64, Option<tauri::PhysicalRect<i32, u32>>) {
     match app.monitor_from_point(x as f64, y as f64) {

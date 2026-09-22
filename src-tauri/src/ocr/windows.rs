@@ -5,7 +5,7 @@ use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapPixelFormat, SoftwareBit
 use windows::Media::Ocr::OcrEngine;
 use windows::Security::Cryptography::CryptographicBuffer;
 
-use super::{join_lines, OcrLine, OcrOutput};
+use super::{join_lines, OcrLine, OcrOutput, OcrWord};
 use crate::error::{AppError, AppResult};
 use crate::geom::Rect;
 use crate::image_util::rgba_to_bgra;
@@ -71,6 +71,7 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
     for line in result.Lines().map_err(werr)? {
         let text = line.Text().map_err(werr)?.to_string();
         let mut bbox: Option<Rect> = None;
+        let mut words = Vec::new();
         for word in line.Words().map_err(werr)? {
             let r = word.BoundingRect().map_err(werr)?;
             let wr = Rect::new(
@@ -83,10 +84,15 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
                 Some(b) => Rect::union_all([b, wr]).unwrap_or(wr),
                 None => wr,
             });
+            words.push(OcrWord {
+                text: word.Text().map_err(werr)?.to_string(),
+                bbox: wr,
+            });
         }
         lines.push(OcrLine {
             text,
             bbox: bbox.unwrap_or_default(),
+            words,
         });
     }
     let text = join_lines(&lines);

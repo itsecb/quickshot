@@ -55,6 +55,7 @@ export interface Hotkeys {
   pin: string;
   color: string;
   history: string;
+  delayedRegion: string;
 }
 
 export type ImageFormat = "png" | "jpeg";
@@ -89,6 +90,8 @@ export interface Settings {
   historyEnabled: boolean;
   historyMaxItems: number;
   historyMaxDays: number;
+  historyOcr: boolean;
+  captureDelaySecs: number;
 }
 
 export interface EditorInit {
@@ -109,6 +112,10 @@ export interface HistoryItem {
   height: number;
   fileName: string;
   source: CaptureSource;
+  /** null = not read yet, "" = no text found */
+  ocrText: string | null;
+  starred: boolean;
+  note: string;
   thumbUrl: string;
   pngUrl: string;
   path: string;
@@ -122,9 +129,16 @@ export interface PinInit {
   pngUrl: string;
 }
 
+export interface OcrWord {
+  text: string;
+  bbox: Rect;
+}
+
 export interface OcrLine {
   text: string;
   bbox: Rect;
+  /** word boxes where the OS engine provides them (Windows); empty elsewhere */
+  words: OcrWord[];
 }
 
 export interface OcrOutput {

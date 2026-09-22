@@ -20,6 +20,14 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
             }
             b.build(app)
         };
+    // the delayed-capture hotkey uses the configured delay; show it on that menu item
+    let delay_accel = |secs: u32| {
+        if settings.capture_delay_secs == secs {
+            hk.delayed_region.as_str()
+        } else {
+            ""
+        }
+    };
     let menu = MenuBuilder::new(app)
         .item(&item("capture_region", "Capture region", &hk.region)?)
         .item(&item("capture_window", "Capture window", &hk.window)?)
@@ -32,6 +40,21 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
             "capture_repeat",
             "Repeat last region",
             &hk.repeat_last,
+        )?)
+        .item(&item(
+            "capture_delay_3",
+            "Capture region in 3 s",
+            delay_accel(3),
+        )?)
+        .item(&item(
+            "capture_delay_5",
+            "Capture region in 5 s",
+            delay_accel(5),
+        )?)
+        .item(&item(
+            "capture_delay_10",
+            "Capture region in 10 s",
+            delay_accel(10),
         )?)
         .separator()
         .item(&item("capture_ocr", "Copy text (OCR)", &hk.ocr)?)
@@ -60,6 +83,9 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
             "capture_window" => capture::trigger(app, CaptureMode::Window),
             "capture_fullscreen" => capture::trigger(app, CaptureMode::Fullscreen),
             "capture_repeat" => capture::trigger(app, CaptureMode::RepeatLast),
+            "capture_delay_3" => capture::trigger_delayed(app, CaptureMode::Region, 3),
+            "capture_delay_5" => capture::trigger_delayed(app, CaptureMode::Region, 5),
+            "capture_delay_10" => capture::trigger_delayed(app, CaptureMode::Region, 10),
             "capture_ocr" => capture::trigger(app, CaptureMode::Ocr),
             "capture_pin" => capture::trigger(app, CaptureMode::Pin),
             "capture_color" => capture::trigger(app, CaptureMode::Color),

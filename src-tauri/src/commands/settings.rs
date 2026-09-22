@@ -31,7 +31,13 @@ pub fn set_settings(
     apply_autostart(&app, settings.autostart);
     // apply new retention limits right away
     let (prune_app, prune_settings) = (app.clone(), settings.clone());
-    std::thread::spawn(move || history::prune(&prune_app, &prune_settings));
+    std::thread::spawn(move || {
+        history::prune(&prune_app, &prune_settings);
+        // picks up entries captured while history OCR was switched off
+        if prune_settings.history_ocr {
+            history::queue_backfill(&prune_app);
+        }
+    });
     let _ = app.emit("settings://changed", &settings);
     Ok(ApplyResult { hotkey_conflicts })
 }

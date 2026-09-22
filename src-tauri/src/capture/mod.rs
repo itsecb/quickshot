@@ -1,6 +1,8 @@
 pub mod monitors;
 
 use std::collections::HashSet;
+use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use image::RgbaImage;
 use serde::Serialize;
@@ -150,6 +152,21 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
     out
 }
 
+/// Topmost window containing the centre of `rect` (`windows` is sorted topmost first).
+pub fn window_at_center(windows: &[WindowInfo], rect: Rect) -> Option<&WindowInfo> {
+    let cx = rect.x + (rect.width / 2) as i32;
+    let cy = rect.y + (rect.height / 2) as i32;
+    windows.iter().find(|w| w.rect.contains(cx, cy))
+}
+
+/// Record which app a capture came from, so history search and per-app rules work for regions too.
+fn fill_app(source: &mut CaptureSource, window: Option<&WindowInfo>) {
+    if let Some(w) = window {
+        source.app_name = w.app_name.clone();
+        source.title = w.title.clone();
+    }
+}
+
 /// Compose an arbitrary global rect from the frozen monitor frames (may span monitors).
 pub fn compose_region(frames: &[CaptureFrame], rect: Rect) -> AppResult<RgbaImage> {
     if rect.is_empty() {
@@ -200,13 +217,62 @@ pub fn monitor_under_cursor<'a>(app: &AppHandle, frames: &'a [CaptureFrame]) -> 
 
 /// Entry point for hotkeys, tray and CLI. Never blocks the caller.
 pub fn trigger(app: &AppHandle, mode: CaptureMode) {
+    trigger_delayed(app, mode, 0);
+}
+
+/// Like `trigger`, after a visible countdown of `delay_secs` (0 = immediately).
+/// Triggering again while a capture is pending cancels a running countdown.
+pub fn trigger_delayed(app: &AppHandle, mode: CaptureMode, delay_secs: u32) {
+    let state = app.state::<AppState>();
+    if state.capture_pending.swap(true, Ordering::SeqCst) {
+        state.countdown_cancel.store(true, Ordering::SeqCst);
+        log::info!("capture already pending; ignoring {mode:?}");
+        return;
+    }
+    state.countdown_cancel.store(false, Ordering::SeqCst);
     let app = app.clone();
     std::thread::spawn(move || {
-        if let Err(e) = begin(&app, mode) {
+        let result =
+            countdown(&app, delay_secs).and_then(|go| if go { begin(&app, mode) } else { Ok(()) });
+        app.state::<AppState>()
+            .capture_pending
+            .store(false, Ordering::SeqCst);
+        if let Err(e) = result {
             log::error!("capture ({mode:?}) failed: {e}");
             crate::windows::toast(&app, "Capture failed", &e.to_string());
         }
     });
+}
+
+/// Show the countdown window and wait. Returns false when cancelled.
+fn countdown(app: &AppHandle, secs: u32) -> AppResult<bool> {
+    if secs == 0 {
+        return Ok(true);
+    }
+    let state = app.state::<AppState>();
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        if let Err(e) = crate::windows::open_countdown(&app2, secs) {
+            log::warn!("countdown window failed: {e}");
+        }
+    })?;
+    let deadline = Instant::now() + Duration::from_secs(secs as u64);
+    let mut cancelled = false;
+    while Instant::now() < deadline {
+        if state.countdown_cancel.load(Ordering::SeqCst) {
+            cancelled = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    if let Some(w) = app.get_webview_window(crate::windows::COUNTDOWN_LABEL) {
+        let _ = w.destroy();
+    }
+    if !cancelled {
+        // give the compositor time to remove the countdown so it is not in the shot
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Ok(!cancelled)
 }
 
 fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
@@ -220,12 +286,16 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
     match mode {
         CaptureMode::Fullscreen => {
             let frame = monitor_under_cursor(app, &frames);
-            let source = CaptureSource {
+            let mut source = CaptureSource {
                 kind: "monitor".into(),
                 monitor_name: frame.monitor.name.clone(),
                 rect: frame.monitor.rect(),
                 ..Default::default()
             };
+            fill_app(
+                &mut source,
+                window_at_center(&list_windows(&frames), source.rect),
+            );
             let capture = state.insert_capture(app, frame.image.clone(), source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
         }
@@ -236,11 +306,12 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 return begin_overlay(app, CaptureMode::Region, frames);
             };
             let image = compose_region(&frames, rect)?;
-            let source = CaptureSource {
+            let mut source = CaptureSource {
                 kind: "region".into(),
                 rect,
                 ..Default::default()
             };
+            fill_app(&mut source, window_at_center(&list_windows(&frames), rect));
             let capture = state.insert_capture(app, image, source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
         }
@@ -317,12 +388,12 @@ pub fn finish(app: &AppHandle, rect: Rect, window_id: Option<u32>) -> AppResult<
         rect,
         ..Default::default()
     };
-    if let Some(wid) = window_id {
-        if let Some(w) = session.windows.iter().find(|w| w.id == wid) {
+    match window_id.and_then(|wid| session.windows.iter().find(|w| w.id == wid)) {
+        Some(w) => {
             source.kind = "window".into();
-            source.app_name = w.app_name.clone();
-            source.title = w.title.clone();
+            fill_app(&mut source, Some(w));
         }
+        None => fill_app(&mut source, window_at_center(&session.windows, rect)),
     }
     if let Some(frame) = session
         .frames
@@ -388,6 +459,36 @@ mod tests {
         assert_eq!(img.get_pixel(9, 9).0, [0, 20, 0, 255]);
         assert_eq!(img.get_pixel(10, 0).0, [0, 0, 30, 255]);
         assert_eq!(img.get_pixel(19, 9).0, [0, 0, 30, 255]);
+    }
+
+    fn win(id: u32, app: &str, rect: Rect) -> WindowInfo {
+        WindowInfo {
+            id,
+            title: format!("{app} window"),
+            app_name: app.into(),
+            rect,
+            z: 0,
+        }
+    }
+
+    #[test]
+    fn window_at_center_prefers_topmost() {
+        // topmost first, as list_windows sorts them
+        let windows = vec![
+            win(1, "Terminal", Rect::new(100, 100, 200, 200)),
+            win(2, "Browser", Rect::new(0, 0, 1000, 800)),
+        ];
+        let region = Rect::new(150, 150, 60, 40); // centre (180, 170) is inside both
+        assert_eq!(
+            window_at_center(&windows, region).unwrap().app_name,
+            "Terminal"
+        );
+        let region = Rect::new(500, 500, 10, 10);
+        assert_eq!(
+            window_at_center(&windows, region).unwrap().app_name,
+            "Browser"
+        );
+        assert!(window_at_center(&windows, Rect::new(2000, 0, 10, 10)).is_none());
     }
 
     #[test]

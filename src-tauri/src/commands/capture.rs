@@ -58,6 +58,14 @@ pub fn cancel_capture(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn trigger_capture(app: AppHandle, mode: CaptureMode) {
-    capture::trigger(&app, mode);
+pub fn trigger_capture(app: AppHandle, mode: CaptureMode, delay: Option<u32>) {
+    capture::trigger_delayed(&app, mode, delay.unwrap_or(0).min(60));
+}
+
+/// Cancel button in the countdown window.
+#[tauri::command]
+pub fn cancel_countdown(state: State<'_, AppState>) {
+    state
+        .countdown_cancel
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }

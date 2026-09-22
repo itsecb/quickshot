@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use image::RgbaImage;
@@ -83,6 +83,10 @@ pub struct AppState {
     pub last_region: Mutex<Option<Rect>>,
     pub temp_files: Mutex<Vec<PathBuf>>,
     pub pending_steps: Mutex<Vec<PendingStep>>,
+    /// A capture was triggered and has not reached the overlay/output yet (incl. countdown).
+    pub capture_pending: AtomicBool,
+    /// Set to abort a running countdown.
+    pub countdown_cancel: AtomicBool,
     next_id: AtomicU64,
 }
 
@@ -95,6 +99,8 @@ impl AppState {
             last_region: Mutex::new(None),
             temp_files: Mutex::new(Vec::new()),
             pending_steps: Mutex::new(Vec::new()),
+            capture_pending: AtomicBool::new(false),
+            countdown_cancel: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         }
     }

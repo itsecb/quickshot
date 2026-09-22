@@ -19,15 +19,22 @@ use tauri_plugin_autostart::MacosLauncher;
 
 use state::{AppState, CaptureMode};
 
-/// `--capture <mode>` / `--settings` / `--guides` / `--history` / `--hidden`
+/// `--capture <mode> [--delay N]` / `--settings` / `--guides` / `--history` / `--hidden`
 fn handle_cli(app: &AppHandle, args: &[String]) {
+    let delay = args
+        .iter()
+        .position(|a| a == "--delay")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0)
+        .min(60);
     let mut it = args.iter();
     let mut did_something = false;
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--capture" | "-c" => {
                 if let Some(mode) = it.next().and_then(|m| CaptureMode::parse(m)) {
-                    capture::trigger(app, mode);
+                    capture::trigger_delayed(app, mode, delay);
                     did_something = true;
                 }
             }
@@ -101,6 +108,7 @@ pub fn run() {
             output::cleanup_temp(&handle);
             let prune_handle = handle.clone();
             std::thread::spawn(move || history::prune(&prune_handle, &settings));
+            history::start_ocr_worker(&handle);
 
             let args: Vec<String> = std::env::args().skip(1).collect();
             let hidden = args.iter().any(|a| a == "--hidden");
@@ -139,6 +147,7 @@ pub fn run() {
             commands::capture::finish_capture,
             commands::capture::cancel_capture,
             commands::capture::trigger_capture,
+            commands::capture::cancel_countdown,
             commands::output::editor_init,
             commands::output::release_capture,
             commands::output::copy_image,
@@ -176,6 +185,8 @@ pub fn run() {
             commands::history::history_save,
             commands::history::history_delete,
             commands::history::history_clear,
+            commands::history::history_set_star,
+            commands::history::history_set_note,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

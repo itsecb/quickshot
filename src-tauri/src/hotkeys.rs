@@ -42,6 +42,19 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
             conflicts.push(format!("{accel}: {e}"));
         }
     }
+    let delayed = settings.hotkeys.delayed_region.trim();
+    if !delayed.is_empty() {
+        let secs = settings.capture_delay_secs.clamp(1, 60);
+        let result = gs.on_shortcut(delayed, move |app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                capture::trigger_delayed(app, CaptureMode::Region, secs);
+            }
+        });
+        if let Err(e) = result {
+            log::warn!("hotkey {delayed} (delayed region) not registered: {e}");
+            conflicts.push(format!("{delayed}: {e}"));
+        }
+    }
     let history = settings.hotkeys.history.trim();
     if !history.is_empty() {
         let result = gs.on_shortcut(history, |app, _shortcut, event| {

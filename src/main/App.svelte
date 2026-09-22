@@ -31,11 +31,12 @@
     measure: "Measure",
   };
 
-  const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode | "history" }[] = [
+  const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode | "history" | "delayed" }[] = [
     { key: "region", label: "Capture region", mode: "region" },
     { key: "window", label: "Capture window", mode: "window" },
     { key: "fullscreen", label: "Capture full screen", mode: "fullscreen" },
     { key: "repeatLast", label: "Repeat last region", mode: "repeatLast" },
+    { key: "delayedRegion", label: "Capture region after delay", mode: "delayed" },
     { key: "ocr", label: "Copy text (OCR)", mode: "ocr" },
     { key: "pin", label: "Pin region to screen", mode: "pin" },
     { key: "color", label: "Pick a colour", mode: "color" },
@@ -92,9 +93,10 @@
     if (typeof dir === "string") settings[target] = dir;
   }
 
-  async function capture(mode: CaptureMode | "history") {
+  async function capture(mode: CaptureMode | "history" | "delayed") {
     if (mode === "history") return openWindow("history");
     await hideMain();
+    if (mode === "delayed") return void triggerCapture("region", settings?.captureDelaySecs ?? 3);
     setTimeout(() => void triggerCapture(mode), 150);
   }
 </script>
@@ -166,6 +168,13 @@
         {#if conflicts.length}
           <div class="conflict">Some hotkeys could not be registered (already used by another app): {conflicts.join("; ")}</div>
         {/if}
+        <div class="row">
+          <label for="delay">Delay for delayed capture</label>
+          <div class="inline">
+            <input id="delay" type="number" min="1" max="60" bind:value={settings.captureDelaySecs} style="width:70px" /> seconds
+          </div>
+          <div class="hint">Time to open a hover or right-click menu before the screen is captured. Press the hotkey again to cancel.</div>
+        </div>
         <h3>Behaviour</h3>
         <div class="row">
           <label for="mag">Magnifier in overlay</label>
@@ -237,6 +246,11 @@
           </div>
         </div>
         <div class="row">
+          <label for="hocr">Make screenshot text searchable</label>
+          <input id="hocr" type="checkbox" bind:checked={settings.historyOcr} />
+          <div class="hint">Reads the text in each capture in the background (Windows OCR) so History can find error codes, hostnames and so on.</div>
+        </div>
+        <div class="row">
           <label for="hmax">Keep at most</label>
           <div class="inline">
             <input id="hmax" type="number" min="0" max="100000" bind:value={settings.historyMaxItems} style="width:90px" /> screenshots
@@ -247,7 +261,7 @@
           <div class="inline">
             <input id="hdays" type="number" min="0" max="3650" bind:value={settings.historyMaxDays} style="width:90px" /> days
           </div>
-          <div class="hint">0 means no limit. History is stored only on this PC, separate from your save folder.</div>
+          <div class="hint">0 means no limit. Starred screenshots are always kept. History is stored only on this PC, separate from your save folder.</div>
         </div>
       {:else if page === "editor"}
         <h2>Editor defaults</h2>

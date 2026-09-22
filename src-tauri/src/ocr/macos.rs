@@ -90,6 +90,7 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
                     (bb.size.width * w as f64).round() as u32,
                     (bb.size.height * h as f64).round() as u32,
                 ),
+                words: Vec::new(),
             });
         }
     }

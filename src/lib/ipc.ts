@@ -33,7 +33,8 @@ export const overlayReady = (label: string) => invoke<void>("overlay_ready", { l
 export const finishCapture = (rect: Rect, windowId?: number) =>
   invoke<number>("finish_capture", { rect, windowId: windowId ?? null });
 export const cancelCapture = () => invoke<void>("cancel_capture");
-export const triggerCapture = (mode: CaptureMode) => invoke<void>("trigger_capture", { mode });
+export const triggerCapture = (mode: CaptureMode, delay?: number) =>
+  invoke<void>("trigger_capture", { mode, delay: delay ?? null });
 
 // ---- editor / output ----
 export const editorInit = (label: string) => invoke<EditorInit>("editor_init", { label });
@@ -101,3 +102,5 @@ export const historyCopy = (id: number) => invoke<void>("history_copy", { id });
 export const historySave = (id: number) => invoke<string>("history_save", { id });
 export const historyDelete = (ids: number[]) => invoke<void>("history_delete", { ids });
 export const historyClear = () => invoke<void>("history_clear");
+export const historySetStar = (id: number, starred: boolean) => invoke<void>("history_set_star", { id, starred });
+export const historySetNote = (id: number, note: string) => invoke<void>("history_set_note", { id, note });

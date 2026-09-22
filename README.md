@@ -16,9 +16,12 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
   Optionally copy every capture to the clipboard while the editor opens.
 * **Pins**: always-on-top floating screenshots. Mouse wheel (or `↑` `↓`) changes opacity,
   `Ctrl`+wheel zooms, double-click or `Esc` closes.
-* **History** (`Ctrl+Shift+H`): every capture is kept locally, grouped by day and searchable by app,
-  window title or date. Reopen in the editor, pin, copy, save, or drag out. Retention is configurable
-  (default 500 captures / 30 days).
+* **History** (`Ctrl+Shift+H`): every capture is kept locally, grouped by day. Search finds text *inside*
+  screenshots (background OCR), app, window title, date, notes and `#tags`. Star (`S`) to keep forever,
+  add notes (`N`). Reopen in the editor, pin, copy, save, or drag out. Retention is configurable
+  (default 500 captures / 30 days; starred are exempt).
+* **Delayed capture** (`Ctrl+Shift+5`, or tray: 3/5/10 s): time to open hover and right-click menus.
+  The countdown never takes focus and is gone before the screen is captured.
 * **OCR**: copy text from any region (`Ctrl+Shift+O`) using Windows OCR / macOS Vision.
 * **Colour picker** (`Ctrl+Shift+C`) copies HEX or RGB.
 * **Guides**: press `Ctrl+E` in the editor to add the image as the next step; write the instructions and
@@ -27,7 +30,7 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 
 Default global hotkeys: `Ctrl+Shift+1` region · `Ctrl+Shift+2` window · `Ctrl+Shift+3` full screen ·
 `Ctrl+Shift+4` repeat last · `Ctrl+Shift+O` OCR · `Ctrl+Shift+P` pin · `Ctrl+Shift+C` colour ·
-`Ctrl+Shift+H` history.
+`Ctrl+Shift+H` history · `Ctrl+Shift+5` delayed region.
 
 ## Building
 
@@ -50,7 +53,7 @@ npm run check            # svelte-check
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Command line: `quickshot --capture region|window|fullscreen|ocr|pin|color`, `--settings`, `--guides`, `--hidden`.
+Command line: `quickshot --capture region|window|fullscreen|ocr|pin|color [--delay N]`, `--settings`, `--guides`, `--history`, `--hidden`.
 
 ## Releases
 

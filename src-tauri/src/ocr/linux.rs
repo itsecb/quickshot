@@ -35,6 +35,7 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
         .map(|l| OcrLine {
             text: l.to_string(),
             bbox: Rect::default(),
+            words: Vec::new(),
         })
         .collect();
     let text = join_lines(&lines);

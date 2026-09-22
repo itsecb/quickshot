@@ -16,10 +16,19 @@ mod windows;
 
 #[derive(Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct OcrWord {
+    pub text: String,
+    pub bbox: Rect,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct OcrLine {
     pub text: String,
     /// Bounding box in pixels of the recognised image.
     pub bbox: Rect,
+    /// Per-word boxes where the engine provides them (Windows); empty elsewhere.
+    pub words: Vec<OcrWord>,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -51,13 +60,19 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
     let mut out = platform_recognize(input, language)?;
     if input.width() != w {
         let f = w as f64 / input.width() as f64;
+        let scale = |r: Rect| {
+            Rect::new(
+                (r.x as f64 * f) as i32,
+                (r.y as f64 * f) as i32,
+                (r.width as f64 * f) as u32,
+                (r.height as f64 * f) as u32,
+            )
+        };
         for line in &mut out.lines {
-            line.bbox = Rect::new(
-                (line.bbox.x as f64 * f) as i32,
-                (line.bbox.y as f64 * f) as i32,
-                (line.bbox.width as f64 * f) as u32,
-                (line.bbox.height as f64 * f) as u32,
-            );
+            line.bbox = scale(line.bbox);
+            for word in &mut line.words {
+                word.bbox = scale(word.bbox);
+            }
         }
     }
     Ok(out)

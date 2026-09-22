@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Permissions for all QuickShot windows",
-  "windows": ["main", "guide", "editor-*", "overlay-*", "pin-*", "history"],
+  "windows": ["main", "guide", "editor-*", "overlay-*", "pin-*", "history", "countdown"],
   "permissions": [
     "core:default",
     "core:window:default",

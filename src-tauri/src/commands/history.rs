@@ -97,3 +97,14 @@ pub fn history_delete(app: AppHandle, ids: Vec<u64>) -> AppResult<()> {
 pub fn history_clear(app: AppHandle) -> AppResult<()> {
     history::clear(&app)
 }
+
+#[tauri::command(async)]
+pub fn history_set_star(app: AppHandle, id: u64, starred: bool) -> AppResult<()> {
+    history::update(&app, id, |e| e.starred = starred).map(|_| ())
+}
+
+#[tauri::command(async)]
+pub fn history_set_note(app: AppHandle, id: u64, note: String) -> AppResult<()> {
+    let note: String = note.trim().chars().take(2000).collect();
+    history::update(&app, id, move |e| e.note = note).map(|_| ())
+}

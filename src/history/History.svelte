@@ -13,6 +13,8 @@
     historyOpen,
     historyPin,
     historySave,
+    historySetNote,
+    historySetStar,
     openWindow,
   } from "$lib/ipc";
   import { isTypingTarget, primaryMod } from "$lib/keys";
@@ -21,6 +23,9 @@
   let items = $state<HistoryItem[]>([]);
   let loaded = $state(false);
   let query = $state("");
+  let starredOnly = $state(false);
+  let editingNote = $state<number | null>(null);
+  let noteDraft = $state("");
   let selected = $state<Set<number>>(new Set());
   let toast = $state<{ text: string; error: boolean } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -45,8 +50,15 @@
 
   onMount(() => {
     void refresh();
-    const un = listen("history://changed", () => void refresh());
-    return () => void un.then((f) => f());
+    const un = [
+      listen("history://changed", () => void refresh()),
+      // background OCR finished one entry: patch it in place instead of reloading everything
+      listen<{ id: number; text: string }>("history://ocr", (ev) => {
+        const item = items.find((i) => i.id === ev.payload.id);
+        if (item) item.ocrText = ev.payload.text;
+      }),
+    ];
+    return () => un.forEach((p) => void p.then((f) => f()));
   });
 
   const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -67,17 +79,49 @@
     return s.kind === "monitor" ? `Screen${s.monitorName ? ` (${s.monitorName})` : ""}` : "Region";
   }
 
+  function tagsOf(note: string): string[] {
+    return [...note.matchAll(/#([\p{L}\p{N}_-]+)/gu)].map((m) => m[1]!.toLowerCase());
+  }
+
+  /** Everything searchable except the OCR text, lower-cased. */
+  function metaText(i: HistoryItem): string {
+    const d = new Date(i.created);
+    return [caption(i), i.source.kind, i.fileName, dayLabel(d), timeFmt.format(d), `${i.width}x${i.height}`, i.note]
+      .join(" ")
+      .toLowerCase();
+  }
+
+  const queryWords = $derived(query.trim().toLowerCase().split(/\s+/).filter(Boolean));
+
   const filtered = $derived.by(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
     return items.filter((i) => {
-      const d = new Date(i.created);
-      const hay = [caption(i), i.source.kind, i.fileName, dayLabel(d), timeFmt.format(d), `${i.width}x${i.height}`]
-        .join(" ")
-        .toLowerCase();
-      return q.split(/\s+/).every((w) => hay.includes(w));
+      if (starredOnly && !i.starred) return false;
+      if (!queryWords.length) return true;
+      const meta = metaText(i);
+      const ocr = (i.ocrText ?? "").toLowerCase();
+      return queryWords.every((w) =>
+        w.startsWith("#") && w.length > 1 ? tagsOf(i.note).includes(w.slice(1)) : meta.includes(w) || ocr.includes(w),
+      );
     });
   });
+
+  /** When a search word only matched text inside the image, show where. */
+  function snippet(i: HistoryItem): { before: string; hit: string; after: string } | null {
+    if (!i.ocrText || !queryWords.length) return null;
+    const meta = metaText(i);
+    const text = i.ocrText.replace(/\s+/g, " ");
+    const lower = text.toLowerCase();
+    const w = queryWords.find((w) => !w.startsWith("#") && !meta.includes(w) && lower.includes(w));
+    if (!w) return null;
+    const at = lower.indexOf(w);
+    const start = Math.max(0, at - 28);
+    const end = Math.min(text.length, at + w.length + 48);
+    return {
+      before: (start > 0 ? "…" : "") + text.slice(start, at),
+      hit: text.slice(at, at + w.length),
+      after: text.slice(at + w.length, end) + (end < text.length ? "…" : ""),
+    };
+  }
 
   const groups = $derived.by(() => {
     const out: { label: string; items: HistoryItem[] }[] = [];
@@ -128,8 +172,42 @@
     );
   }
 
+  async function toggleStar(list: HistoryItem[]) {
+    if (!list.length) return;
+    const starred = !list.every((i) => i.starred);
+    for (const item of list) item.starred = starred; // optimistic; the reload confirms it
+    await run(starred ? "Starred (never auto-deleted)" : "Unstarred", () =>
+      Promise.all(list.map((i) => historySetStar(i.id, starred))),
+    );
+  }
+
+  function startNote(item: HistoryItem) {
+    editingNote = item.id;
+    noteDraft = item.note;
+    requestAnimationFrame(() => document.getElementById(`note-${item.id}`)?.focus());
+  }
+
+  async function saveNote(item: HistoryItem) {
+    if (editingNote !== item.id) return;
+    editingNote = null;
+    if (noteDraft.trim() === item.note) return;
+    item.note = noteDraft.trim();
+    await run("", () => historySetNote(item.id, noteDraft));
+  }
+
+  function onNoteKey(e: KeyboardEvent, item: HistoryItem) {
+    e.stopPropagation();
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void saveNote(item);
+    } else if (e.key === "Escape") {
+      editingNote = null;
+    }
+  }
+
   async function clearAll() {
-    const ok = await confirm(`Delete all ${items.length} screenshots from history? This cannot be undone.`, {
+    const unstarred = items.filter((i) => !i.starred).length;
+    const ok = await confirm(`Delete ${unstarred} screenshots from history? Starred ones are kept. This cannot be undone.`, {
       title: "Clear history",
       kind: "warning",
     });
@@ -186,6 +264,11 @@
       void edit(one);
     } else if (k === "p" && one) {
       void pin(one);
+    } else if (k === "s" && !primaryMod(e) && sel.length) {
+      void toggleStar(sel);
+    } else if (k === "n" && one) {
+      e.preventDefault();
+      startNote(one);
     } else if (k === "delete" || k === "backspace") {
       void remove(sel);
     } else if (k === "escape") {
@@ -199,14 +282,15 @@
 <div class="history">
   <header>
     <h1>History</h1>
-    <input id="history-search" type="text" placeholder="Search app, window title, date…" bind:value={query} />
+    <input id="history-search" type="text" placeholder="Search text in screenshots, app, title, #tag…" bind:value={query} />
+    <button class="chip" class:on={starredOnly} onclick={() => (starredOnly = !starredOnly)} title="Show only starred">★ Starred</button>
     <span class="muted count">{filtered.length === items.length ? items.length : `${filtered.length} of ${items.length}`}</span>
     <div class="spacer"></div>
     {#if selected.size > 1}
       <button onclick={() => remove(selectedItems())}>Delete {selected.size}</button>
     {/if}
     <button onclick={openFolder}>Open folder</button>
-    <button onclick={clearAll} disabled={!items.length}>Clear all</button>
+    <button onclick={clearAll} disabled={!items.some((i) => !i.starred)}>Clear all</button>
     <button onclick={() => openWindow("main")} title="History settings (Output page)">Settings…</button>
   </header>
 
@@ -219,7 +303,7 @@
         <p class="muted">Every capture you take shows up here, newest first. Retention is set on the Output page in Settings.</p>
       </div>
     {:else if !filtered.length}
-      <p class="muted empty">Nothing matches “{query}”.</p>
+      <p class="muted empty">{starredOnly && !query ? "No starred screenshots yet. Press S on a screenshot to star it." : `Nothing matches “${query}”.`}</p>
     {:else}
       {#each groups as group (group.label)}
         <section>
@@ -244,17 +328,49 @@
               >
                 <div class="thumb">
                   <img src={item.thumbUrl} alt="" loading="lazy" draggable="false" />
+                  <button
+                    class="star"
+                    class:on={item.starred}
+                    onclick={(e) => (e.stopPropagation(), toggleStar([item]))}
+                    title={item.starred ? "Unstar (S)" : "Star: never auto-deleted (S)"}>{item.starred ? "★" : "☆"}</button
+                  >
                   <div class="actions">
                     <button onclick={(e) => (e.stopPropagation(), edit(item))} title="Open in editor (Enter)">Edit</button>
                     <button onclick={(e) => (e.stopPropagation(), pin(item))} title="Pin to screen (P)">Pin</button>
                     <button onclick={(e) => (e.stopPropagation(), copy(item))} title="Copy image (Ctrl+C)">Copy</button>
                     <button onclick={(e) => (e.stopPropagation(), save(item))} title="Save to screenshots folder (Ctrl+S)">Save</button>
+                    <button onclick={(e) => (e.stopPropagation(), startNote(item))} title="Add a note or #tags (N)">Note</button>
                     <button class="danger" onclick={(e) => (e.stopPropagation(), remove([item]))} title="Delete (Del)">✕</button>
                   </div>
                 </div>
                 <div class="meta">
                   <span class="caption">{caption(item)}</span>
                   <span class="muted">{timeFmt.format(new Date(item.created))} · {item.width}×{item.height}</span>
+                  {#if snippet(item)}
+                    {@const sn = snippet(item)!}
+                    <span class="snippet" title="Found in the screenshot's text">{sn.before}<mark>{sn.hit}</mark>{sn.after}</span>
+                  {/if}
+                  {#if editingNote === item.id}
+                    <textarea
+                      id={"note-" + item.id}
+                      class="note-edit"
+                      rows="2"
+                      placeholder="Note… use #tags · Enter saves, Esc cancels"
+                      bind:value={noteDraft}
+                      onkeydown={(e) => onNoteKey(e, item)}
+                      onblur={() => saveNote(item)}
+                      onclick={(e) => e.stopPropagation()}
+                      onmousedown={(e) => e.stopPropagation()}
+                      ondblclick={(e) => e.stopPropagation()}
+                    ></textarea>
+                  {:else if item.note}
+                    <span class="note">
+                      {item.note.replace(/#[\p{L}\p{N}_-]+/gu, "").trim()}
+                      {#each tagsOf(item.note) as tag (tag)}
+                        <button class="tag" onclick={(e) => (e.stopPropagation(), (query = "#" + tag))}>#{tag}</button>
+                      {/each}
+                    </span>
+                  {/if}
                 </div>
               </div>
             {/each}
