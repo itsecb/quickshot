@@ -11,16 +11,46 @@ use crate::error::{AppError, AppResult};
 use crate::image_util::{encode_jpeg, encode_png_small};
 use crate::settings::{self, AfterCapture, ImageFormat, Settings};
 use crate::state::{AppState, Capture, CaptureMode, CaptureSource};
-use crate::{history, ocr, qr, ticket, windows};
+use crate::{history, ocr, qr, redact, rules, ticket, windows};
 
 pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) -> AppResult<()> {
     let state = app.state::<AppState>();
     let settings = state.settings();
-    if !matches!(
+    let produces_image = !matches!(
         mode,
         CaptureMode::Ocr | CaptureMode::Color | CaptureMode::Qr
-    ) {
-        history::spawn_record(app, capture.clone());
+    );
+    let rule = produces_image
+        .then(|| {
+            rules::effective(
+                &settings.rules,
+                &capture.source.app_name,
+                &capture.source.title,
+            )
+        })
+        .flatten();
+    if let Some(r) = &rule {
+        log::info!("capture matched rule(s): {}", r.name);
+    }
+    let auto_redact = rule.as_ref().is_some_and(|r| r.auto_redact);
+    let auto_copy = rule.as_ref().is_some_and(|r| r.auto_copy);
+    // Everything that leaves the editor (history, pins, direct copy/save, rule folders) gets
+    // redacted pixels; the editor gets the original plus editable redaction boxes.
+    let shared = if auto_redact {
+        Arc::new(redacted_capture(&settings, &capture))
+    } else {
+        capture.clone()
+    };
+    if produces_image && !rule.as_ref().is_some_and(|r| r.skip_history) {
+        history::spawn_record(app, shared.clone());
+    }
+    if let Some(dir) = rule.as_ref().and_then(|r| r.save_dir.clone()) {
+        let mut to_folder = settings.clone();
+        to_folder.save_dir = Some(dir);
+        if let Err(e) = save_to_folder(app, &to_folder, &shared.image, &shared.source, None) {
+            log::warn!("rule save failed: {e}");
+            windows::toast(app, "Rule could not save the capture", &e.to_string());
+        }
     }
     match mode {
         CaptureMode::Ocr => {
@@ -43,9 +73,15 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
         }
         CaptureMode::Pin => {
             let (x, y) = (capture.source.rect.x, capture.source.rect.y);
+            if auto_redact {
+                state.replace_capture(shared.clone());
+            }
+            if auto_copy {
+                copy_to_clipboard(app, &shared.image)?;
+            }
             let app2 = app.clone();
             app.run_on_main_thread(move || {
-                if let Err(e) = windows::open_pin(&app2, &capture, x, y) {
+                if let Err(e) = windows::open_pin(&app2, &shared, x, y) {
                     log::error!("pin failed: {e}");
                 }
             })?;
@@ -84,10 +120,13 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
         }
         _ => match settings.after_capture {
             AfterCapture::Editor | AfterCapture::EditorAndCopy => {
-                if settings.after_capture == AfterCapture::EditorAndCopy {
-                    if let Err(e) = copy_to_clipboard(app, &capture.image) {
+                if settings.after_capture == AfterCapture::EditorAndCopy || auto_copy {
+                    if let Err(e) = copy_to_clipboard(app, &shared.image) {
                         log::warn!("copy after capture failed: {e}");
                     }
+                }
+                if auto_redact {
+                    state.auto_redact.lock().unwrap().insert(capture.id);
                 }
                 let app2 = app.clone();
                 app.run_on_main_thread(move || {
@@ -98,7 +137,7 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
                 Ok(())
             }
             AfterCapture::Copy => {
-                copy_to_clipboard(app, &capture.image)?;
+                copy_to_clipboard(app, &shared.image)?;
                 state.remove_capture(capture.id);
                 windows::toast(
                     app,
@@ -108,15 +147,37 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
                 Ok(())
             }
             AfterCapture::Save | AfterCapture::CopyAndSave => {
-                let path = save_to_folder(app, &settings, &capture.image, &capture.source, None)?;
-                if settings.after_capture == AfterCapture::CopyAndSave || settings.copy_on_save {
-                    copy_to_clipboard(app, &capture.image)?;
+                let path = save_to_folder(app, &settings, &shared.image, &shared.source, None)?;
+                if settings.after_capture == AfterCapture::CopyAndSave
+                    || settings.copy_on_save
+                    || auto_copy
+                {
+                    copy_to_clipboard(app, &shared.image)?;
                 }
                 state.remove_capture(capture.id);
                 windows::toast(app, "Saved", &path.display().to_string());
                 Ok(())
             }
         },
+    }
+}
+
+/// A copy of `capture` with everything `redact` finds pixelated (for rules with auto-redact).
+fn redacted_capture(settings: &Settings, capture: &Capture) -> Capture {
+    let mut image = capture.image.clone();
+    match ocr::recognize(&capture.image, settings.ocr_language.as_deref()) {
+        Ok(out) => {
+            for m in redact::find_sensitive(&out.lines, &settings.redact_patterns) {
+                redact::pixelate(&mut image, m.rect, 12);
+            }
+        }
+        Err(e) => log::warn!("auto-redact OCR failed: {e}"),
+    }
+    Capture {
+        id: capture.id,
+        image,
+        source: capture.source.clone(),
+        created: capture.created,
     }
 }
 
@@ -134,7 +195,7 @@ pub fn copy_rich(app: &AppHandle, img: &RgbaImage, png: &[u8], caption: &str) ->
     #[cfg(windows)]
     {
         let _ = app;
-        copy_rich_windows(img, png, caption, &html)
+        write_clipboard_windows(img, png, Some(&html), Some(caption))
     }
     #[cfg(not(windows))]
     {
@@ -145,8 +206,15 @@ pub fn copy_rich(app: &AppHandle, img: &RgbaImage, png: &[u8], caption: &str) ->
     }
 }
 
+/// One clipboard write with PNG + CF_DIB, plus optional HTML and plain text, so every app
+/// finds a format it likes. Also used by headless `--copy`, which has no Tauri runtime.
 #[cfg(windows)]
-fn copy_rich_windows(img: &RgbaImage, png: &[u8], caption: &str, html: &str) -> AppResult<()> {
+pub fn write_clipboard_windows(
+    img: &RgbaImage,
+    png: &[u8],
+    html: Option<&str>,
+    text: Option<&str>,
+) -> AppResult<()> {
     use clipboard_win::options::NoClear;
     use clipboard_win::{formats, raw, Clipboard};
     let err = |e: clipboard_win::ErrorCode| AppError::Other(format!("clipboard: {e}"));
@@ -156,11 +224,11 @@ fn copy_rich_windows(img: &RgbaImage, png: &[u8], caption: &str, html: &str) -> 
         raw::set_without_clear(png_format.get(), png).map_err(err)?;
     }
     raw::set_without_clear(formats::CF_DIB, &ticket::dib(img)).map_err(err)?;
-    if let Some(html_format) = raw::register_format("HTML Format") {
+    if let (Some(html), Some(html_format)) = (html, raw::register_format("HTML Format")) {
         raw::set_html_with(html_format.get(), html, NoClear).map_err(err)?;
     }
-    if !caption.is_empty() {
-        raw::set_string_with(caption, NoClear).map_err(err)?;
+    if let Some(text) = text.filter(|t| !t.is_empty()) {
+        raw::set_string_with(text, NoClear).map_err(err)?;
     }
     Ok(())
 }

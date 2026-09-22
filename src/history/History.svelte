@@ -6,6 +6,7 @@
   import { startDrag } from "@crabnebula/tauri-plugin-drag";
   import {
     historyClear,
+    historyCompare,
     historyCopy,
     historyCopyRich,
     historyDelete,
@@ -171,6 +172,29 @@
     });
   const save = (item: HistoryItem) => run("", async () => say(`Saved ${await historySave(item.id)}`));
 
+  /** Newest older capture of the same window (app + title), else same size, else the one before. */
+  function previousOf(item: HistoryItem): HistoryItem | null {
+    const older = items.filter((i) => i.id < item.id); // items are newest first
+    const sameWindow = (i: HistoryItem) =>
+      !!(item.source.appName || item.source.title) &&
+      i.source.appName === item.source.appName &&
+      i.source.title === item.source.title;
+    return (
+      older.find(sameWindow) ??
+      older.find((i) => i.width === item.width && i.height === item.height) ??
+      older[0] ??
+      null
+    );
+  }
+
+  async function compare(list: HistoryItem[]) {
+    if (list.length === 2) return run("", () => historyCompare(list[0]!.id, list[1]!.id));
+    if (list.length !== 1) return say("Select one screenshot (compares with its previous capture) or two", true);
+    const prev = previousOf(list[0]!);
+    if (!prev) return say("Nothing older to compare with", true);
+    await run("", () => historyCompare(prev.id, list[0]!.id));
+  }
+
   async function remove(list: HistoryItem[]) {
     if (!list.length) return;
     await run(list.length > 1 ? `Deleted ${list.length} screenshots` : "Deleted", () =>
@@ -272,6 +296,8 @@
       void pin(one);
     } else if (k === "s" && !primaryMod(e) && sel.length) {
       void toggleStar(sel);
+    } else if (k === "c" && !primaryMod(e) && (sel.length === 1 || sel.length === 2)) {
+      void compare(sel);
     } else if (k === "n" && one) {
       e.preventDefault();
       startNote(one);
@@ -292,6 +318,14 @@
     <button class="chip" class:on={starredOnly} onclick={() => (starredOnly = !starredOnly)} title="Show only starred">★ Starred</button>
     <span class="muted count">{filtered.length === items.length ? items.length : `${filtered.length} of ${items.length}`}</span>
     <div class="spacer"></div>
+    {#if selected.size === 1 || selected.size === 2}
+      <button
+        class="primary"
+        onclick={() => compare(selectedItems())}
+        title={selected.size === 2 ? "Compare the two selected screenshots (C)" : "Compare with the previous capture of the same window (C)"}
+        >{selected.size === 2 ? "Compare" : "Compare with previous"}</button
+      >
+    {/if}
     {#if selected.size > 1}
       <button onclick={() => remove(selectedItems())}>Delete {selected.size}</button>
     {/if}

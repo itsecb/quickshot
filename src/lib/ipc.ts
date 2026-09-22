@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   AppPaths,
   ApplyResult,
+  DiffResult,
   CaptureMode,
   DirEntry,
   EditorInit,
@@ -110,5 +111,7 @@ export const historySave = (id: number) => invoke<string>("history_save", { id }
 export const historyDelete = (ids: number[]) => invoke<void>("history_delete", { ids });
 export const historyClear = () => invoke<void>("history_clear");
 export const historySetStar = (id: number, starred: boolean) => invoke<void>("history_set_star", { id, starred });
+export const historyDiff = (a: number, b: number) => invoke<DiffResult>("history_diff", { a, b });
+export const historyCompare = (a: number, b: number) => invoke<void>("history_compare", { a, b });
 export const historyCopyRich = (id: number) => invoke<string>("history_copy_rich", { id });
 export const historySetNote = (id: number, note: string) => invoke<void>("history_set_note", { id, note });

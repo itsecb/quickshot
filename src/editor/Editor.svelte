@@ -130,6 +130,8 @@
       stage.setTool("arrow");
       tool = "arrow";
       syncHistoryFlags();
+      // a per-app rule asked for this: boxes stay editable, Ctrl+Z removes them all
+      if (init.autoRedact) void doRedact();
       await win.onCloseRequested(async (ev) => {
         if (!dirty) return;
         const ok = await confirm("Close without saving your markup?", { title: "QuickShot", kind: "warning", okLabel: "Close" });

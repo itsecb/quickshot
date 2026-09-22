@@ -89,6 +89,8 @@ pub struct AppState {
     pub capture_pending: AtomicBool,
     /// Set to abort a running countdown.
     pub countdown_cancel: AtomicBool,
+    /// Captures whose editor should auto-redact on open (per-app rules).
+    pub auto_redact: Mutex<HashSet<u64>>,
     next_id: AtomicU64,
 }
 
@@ -103,6 +105,7 @@ impl AppState {
             pending_steps: Mutex::new(Vec::new()),
             capture_pending: AtomicBool::new(false),
             countdown_cancel: AtomicBool::new(false),
+            auto_redact: Mutex::new(HashSet::new()),
             next_id: AtomicU64::new(1),
         }
     }
@@ -151,6 +154,11 @@ impl AppState {
 
     pub fn capture(&self, id: u64) -> Option<Arc<Capture>> {
         self.captures.lock().unwrap().get(&id).cloned()
+    }
+
+    /// Swap in processed pixels (e.g. redacted) for a capture that windows already refer to.
+    pub fn replace_capture(&self, capture: Arc<Capture>) {
+        self.captures.lock().unwrap().insert(capture.id, capture);
     }
 
     pub fn remove_capture(&self, id: u64) {

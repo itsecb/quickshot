@@ -26,6 +26,8 @@ pub struct EditorInit {
     pub source: CaptureSource,
     pub created: String,
     pub settings: Settings,
+    /// A per-app rule asked for automatic redaction.
+    pub auto_redact: bool,
 }
 
 fn capture_id_from_label(label: &str) -> Option<u64> {
@@ -48,6 +50,7 @@ pub fn editor_init(state: State<'_, AppState>, label: String) -> AppResult<Edito
         source: capture.source.clone(),
         created: capture.created.to_rfc3339(),
         settings: state.settings(),
+        auto_redact: state.auto_redact.lock().unwrap().remove(&id),
     })
 }
 

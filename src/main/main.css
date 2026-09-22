@@ -190,3 +190,38 @@ code {
   user-select: text;
   -webkit-user-select: text;
 }
+
+.rule {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--bg-elev);
+}
+
+.rule.off {
+  opacity: 0.6;
+}
+
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.rule-head .rule-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.rule .checks {
+  display: flex;
+  gap: 18px;
+  padding: 6px 0;
+}
+
+button.danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}

@@ -58,6 +58,29 @@ pub fn open_history(app: &AppHandle) {
     }
 }
 
+/// Before/after window for two history captures.
+pub fn open_compare(app: &AppHandle, before: u64, after: u64) {
+    let label = format!("compare-{before}-{after}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return;
+    }
+    let result = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("compare.html".into()))
+        .title("QuickShot Compare")
+        .initialization_script(format!(
+            "window.__QS_COMPARE = {{ before: {before}, after: {after} }};"
+        ))
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(640.0, 420.0)
+        .center()
+        .build();
+    if let Err(e) = result {
+        log::error!("compare window failed: {e}");
+    }
+}
+
 pub const COUNTDOWN_LABEL: &str = "countdown";
 
 /// Small always-on-top countdown in the corner of the cursor's monitor. It never takes focus,

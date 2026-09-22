@@ -34,6 +34,7 @@ export default defineConfig({
         guide: resolve(root, "guide.html"),
         history: resolve(root, "history.html"),
         countdown: resolve(root, "countdown.html"),
+        compare: resolve(root, "compare.html"),
       },
     },
   },

@@ -20,6 +20,13 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
   screenshots (background OCR), app, window title, date, notes and `#tags`. Star (`S`) to keep forever,
   add notes (`N`). Reopen in the editor, pin, copy, save, or drag out. Retention is configurable
   (default 500 captures / 30 days; starred are exempt).
+* **Before/after compare**: select two captures in History (or one, to compare with the previous
+  capture of the same window) and press `C`. Auto-aligns shifted captures, then shows changed areas,
+  side by side, a swipe slider, or blink.
+* **Per-app rules** (Settings → Rules): skip history, auto-redact, always copy, or also save to a folder
+  based on the app or window title. Ships with a rule that keeps password managers out of history.
+* **Scriptable capture**: `quickshot --out <file|folder>` captures with no UI and a real exit code
+  (see below).
 * **Delayed capture** (`Ctrl+Shift+5`, or tray: 3/5/10 s): time to open hover and right-click menus.
   The countdown never takes focus and is gone before the screen is captured.
 * **Auto-redact** (`Ctrl+Shift+X` in the editor): finds IPs, MACs, emails, GUIDs, SIDs, internal
@@ -38,6 +45,46 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 Default global hotkeys: `Ctrl+Shift+1` region · `Ctrl+Shift+2` window · `Ctrl+Shift+3` full screen ·
 `Ctrl+Shift+4` repeat last · `Ctrl+Shift+O` OCR · `Ctrl+Shift+P` pin · `Ctrl+Shift+C` colour ·
 `Ctrl+Shift+H` history · `Ctrl+Shift+5` delayed region · `Ctrl+Shift+Q` QR/barcode.
+
+## Scriptable capture
+
+Any command line with `--out` runs without the tray app or any window, writes the file, prints its
+path and exits (0 saved, 2 bad arguments, 3 monitor/window not found, 4 capture or write failed).
+`quickshot --help` lists every option.
+
+The installer doesn't add QuickShot to `PATH`; in PowerShell (add it to your `$PROFILE` to keep it):
+
+```powershell
+Set-Alias quickshot "$env:LOCALAPPDATA\QuickShot\QuickShot.exe"   # default per-user install location
+```
+
+```powershell
+# whole primary screen into a folder (unique name from the pattern)
+quickshot --out C:\Evidence\ | Out-Null
+
+# a specific window (title or app contains the text), as JPEG, also on the clipboard
+quickshot --window "Grafana" --out D:\Dashboards\grafana.jpg --copy | Out-Null
+
+# every monitor, or monitor 2, or an exact desktop rectangle, after a 5 s delay
+quickshot --monitor all --out .\all.png | Out-Null
+quickshot --monitor 2 --delay 5 --out .\m2.png | Out-Null
+quickshot --rect 0,0,1280,720 --out .\corner.png | Out-Null
+
+# exit code and printed path in a script
+$p = Start-Process quickshot -ArgumentList '--out','C:\Evidence\' -Wait -PassThru -NoNewWindow
+if ($p.ExitCode -ne 0) { throw "capture failed ($($p.ExitCode))" }
+```
+
+QuickShot is a Windows GUI app, so PowerShell and cmd don't wait for it on their own: pipe to
+`Out-Null` or use `Start-Process -Wait` as above. Task Scheduler always waits. Example scheduled
+snapshot every 15 minutes:
+
+```powershell
+$a = New-ScheduledTaskAction -Execute "$env:LOCALAPPDATA\QuickShot\QuickShot.exe" `
+      -Argument '--window "NOC Dashboard" --out D:\NOC\ --name "noc {datetime}"'
+$t = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName "QuickShot NOC snapshot" -Action $a -Trigger $t
+```
 
 ## Building
 

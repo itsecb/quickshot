@@ -307,6 +307,41 @@ fn span_rect(line: &OcrLine, span: Span) -> Option<Rect> {
     ))
 }
 
+/// Pixelate `rect` in place with `block`-sized squares (for captures that never reach the
+/// editor, e.g. a rule that auto-redacts and copies). Clipped to the image.
+pub fn pixelate(img: &mut image::RgbaImage, rect: Rect, block: u32) {
+    let block = block.max(2);
+    let x0 = rect.x.max(0) as u32;
+    let y0 = rect.y.max(0) as u32;
+    let x1 = (rect.right().max(0) as u32).min(img.width());
+    let y1 = (rect.bottom().max(0) as u32).min(img.height());
+    let mut by = y0;
+    while by < y1 {
+        let bh = block.min(y1 - by);
+        let mut bx = x0;
+        while bx < x1 {
+            let bw = block.min(x1 - bx);
+            let mut sum = [0u32; 4];
+            for y in by..by + bh {
+                for x in bx..bx + bw {
+                    for (s, c) in sum.iter_mut().zip(img.get_pixel(x, y).0) {
+                        *s += c as u32;
+                    }
+                }
+            }
+            let n = bw * bh;
+            let avg = image::Rgba(sum.map(|s| (s / n) as u8));
+            for y in by..by + bh {
+                for x in bx..bx + bw {
+                    img.put_pixel(x, y, avg);
+                }
+            }
+            bx += bw;
+        }
+        by += bh;
+    }
+}
+
 /// Every sensitive-looking hit in `lines`, as pixel rects in the same space as the OCR input.
 pub fn find_sensitive(lines: &[OcrLine], custom_patterns: &[String]) -> Vec<RedactMatch> {
     let custom = parse_custom(custom_patterns);
@@ -472,6 +507,24 @@ mod tests {
             m[0].rect,
             Rect::new(50 - PAD, -PAD, 40 + 2 * PAD as u32, 16)
         );
+    }
+
+    #[test]
+    fn pixelate_averages_blocks_and_clips() {
+        let mut img = image::RgbaImage::from_fn(8, 4, |x, _| {
+            image::Rgba(if x % 2 == 0 {
+                [0, 0, 0, 255]
+            } else {
+                [200, 100, 50, 255]
+            })
+        });
+        pixelate(&mut img, Rect::new(-2, 0, 6, 4), 2);
+        // inside: 2x2 blocks averaged
+        assert_eq!(img.get_pixel(0, 0).0, [100, 50, 25, 255]);
+        assert_eq!(img.get_pixel(3, 3).0, [100, 50, 25, 255]);
+        // outside the rect: untouched
+        assert_eq!(img.get_pixel(4, 0).0, [0, 0, 0, 255]);
+        assert_eq!(img.get_pixel(5, 0).0, [200, 100, 50, 255]);
     }
 
     #[test]

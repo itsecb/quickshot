@@ -1,7 +1,10 @@
 mod capture;
+mod cli;
 mod commands;
+mod diff;
 mod error;
 mod geom;
+mod headless;
 mod history;
 mod hotkeys;
 mod image_util;
@@ -11,6 +14,7 @@ mod overlay;
 mod protocol;
 mod qr;
 mod redact;
+mod rules;
 mod settings;
 mod state;
 mod ticket;
@@ -61,6 +65,16 @@ fn handle_cli(app: &AppHandle, args: &[String]) {
         // launched again without flags: bring up the settings window
         windows::show_main(app);
     }
+}
+
+/// True when the command line asks for a scriptable capture (`--out`) or help.
+pub fn wants_headless(args: &[String]) -> bool {
+    cli::wants_headless(args)
+}
+
+/// Run a scriptable capture and return the process exit code. Never starts Tauri.
+pub fn run_headless(args: &[String]) -> i32 {
+    headless::run(args)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -194,6 +208,8 @@ pub fn run() {
             commands::history::history_set_star,
             commands::history::history_set_note,
             commands::history::history_copy_rich,
+            commands::history::history_diff,
+            commands::history::history_compare,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

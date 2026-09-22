@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppResult;
+use crate::rules::Rule;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
@@ -182,6 +183,8 @@ pub struct Settings {
     pub redact_patterns: Vec<String>,
     /// Caption for "Copy for ticket". Tokens: {title} {app} {date} {time} {datetime} {host} {user} {w} {h}
     pub ticket_caption: String,
+    /// Per-app behaviour (skip history, auto-redact, auto-copy, save folder).
+    pub rules: Vec<Rule>,
 }
 
 impl Default for Settings {
@@ -207,6 +210,7 @@ impl Default for Settings {
             capture_delay_secs: 3,
             redact_patterns: Vec::new(),
             ticket_caption: "{title} — {app} · {datetime} · {host}".into(),
+            rules: crate::rules::default_rules(),
         }
     }
 }

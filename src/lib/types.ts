@@ -105,6 +105,28 @@ export interface Settings {
   captureDelaySecs: number;
   redactPatterns: string[];
   ticketCaption: string;
+  rules: Rule[];
+}
+
+export interface Rule {
+  enabled: boolean;
+  name: string;
+  /** comma-separated substrings of the app name */
+  app: string;
+  /** comma-separated substrings of the window title */
+  title: string;
+  skipHistory: boolean;
+  autoRedact: boolean;
+  autoCopy: boolean;
+  saveDir: string | null;
+}
+
+export interface DiffResult {
+  offsetX: number;
+  offsetY: number;
+  boxes: Rect[];
+  changedPercent: number;
+  sameSize: boolean;
 }
 
 export interface RedactMatch {
@@ -127,6 +149,7 @@ export interface EditorInit {
   source: CaptureSource;
   created: string;
   settings: Settings;
+  autoRedact: boolean;
 }
 
 export interface HistoryItem {

@@ -2,11 +2,11 @@
   import { onMount } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { appPaths, getSettings, hideMain, openWindow, setSettings, triggerCapture } from "$lib/ipc";
-  import type { AppPaths, CaptureMode, Settings } from "$lib/types";
+  import { appPaths, getSettings, hideMain, historyList, openWindow, setSettings, triggerCapture } from "$lib/ipc";
+  import type { AppPaths, CaptureMode, Rule, Settings } from "$lib/types";
   import { acceleratorFromEvent } from "./hotkey";
 
-  type Page = "home" | "capture" | "output" | "editor" | "about";
+  type Page = "home" | "capture" | "output" | "rules" | "editor" | "about";
   let page = $state<Page>("home");
   let settings = $state<Settings | null>(null);
   let paths = $state<AppPaths | null>(null);
@@ -15,6 +15,38 @@
   let saved = $state(false);
   let saving = $state(false);
   let error = $state<string | null>(null);
+  let knownApps = $state<string[]>([]);
+
+  async function openRules() {
+    page = "rules";
+    try {
+      const items = await historyList();
+      knownApps = [...new Set(items.map((i) => i.source.appName).filter(Boolean))].sort();
+    } catch {
+      knownApps = [];
+    }
+  }
+
+  function addRule() {
+    if (!settings) return;
+    const rule: Rule = {
+      enabled: true,
+      name: "",
+      app: "",
+      title: "",
+      skipHistory: false,
+      autoRedact: true,
+      autoCopy: false,
+      saveDir: null,
+    };
+    settings.rules = [...settings.rules, rule];
+  }
+
+  async function pickRuleFolder(i: number) {
+    if (!settings) return;
+    const dir = await openDialog({ directory: true, multiple: false });
+    if (typeof dir === "string") settings.rules[i]!.saveDir = dir;
+  }
 
   const TOOL_NAMES: Record<string, string> = {
     select: "Select / move",
@@ -113,6 +145,7 @@
       <button class:active={page === "home"} onclick={() => (page = "home")}>Home</button>
       <button class:active={page === "capture"} onclick={() => (page = "capture")}>Hotkeys</button>
       <button class:active={page === "output"} onclick={() => (page = "output")}>Output</button>
+      <button class:active={page === "rules"} onclick={openRules}>Rules</button>
       <button class:active={page === "editor"} onclick={() => (page = "editor")}>Editor</button>
       <button class:active={page === "about"} onclick={() => (page = "about")}>About</button>
       <div class="bottom">
@@ -287,6 +320,49 @@
           </div>
           <div class="hint">0 means no limit. Starred screenshots are always kept. History is stored only on this PC, separate from your save folder.</div>
         </div>
+      {:else if page === "rules"}
+        <h2>Per-app rules</h2>
+        <p class="muted">
+          When a capture comes from a matching app or window, these apply on top of your normal settings. Matching is by
+          part of the app name or window title, case-insensitive; separate alternatives with commas.
+        </p>
+        <datalist id="known-apps">
+          {#each knownApps as a (a)}<option value={a}></option>{/each}
+        </datalist>
+        {#each settings.rules as rule, i (i)}
+          <div class="rule" class:off={!rule.enabled}>
+            <div class="rule-head">
+              <input type="checkbox" bind:checked={rule.enabled} title="Enabled" />
+              <input type="text" class="rule-name" placeholder="Rule name" bind:value={rule.name} />
+              <button class="danger" onclick={() => settings && (settings.rules = settings.rules.filter((_, j) => j !== i))}>Delete</button>
+            </div>
+            <div class="row">
+              <label for={"rule-app-" + i}>App name contains</label>
+              <input id={"rule-app-" + i} type="text" list="known-apps" placeholder="e.g. KeePass, mmc, Chrome" bind:value={rule.app} />
+            </div>
+            <div class="row">
+              <label for={"rule-title-" + i}>Window title contains</label>
+              <input id={"rule-title-" + i} type="text" placeholder="e.g. Azure, Grafana (optional)" bind:value={rule.title} />
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" bind:checked={rule.skipHistory} /> Don't keep in history</label>
+              <label><input type="checkbox" bind:checked={rule.autoRedact} /> Auto-redact</label>
+              <label><input type="checkbox" bind:checked={rule.autoCopy} /> Always copy</label>
+            </div>
+            <div class="row">
+              <label for={"rule-dir-" + i}>Also save to</label>
+              <div class="inline">
+                <input id={"rule-dir-" + i} type="text" placeholder="(no extra folder)" bind:value={rule.saveDir} />
+                <button onclick={() => pickRuleFolder(i)}>Browse…</button>
+              </div>
+            </div>
+          </div>
+        {/each}
+        <button onclick={addRule}>+ Add rule</button>
+        <p class="muted">
+          Auto-redact pixelates what the Redact tool finds before the image goes to history, the clipboard or a folder; in
+          the editor the boxes stay editable. Region captures match the window under the centre of the selection.
+        </p>
       {:else if page === "editor"}
         <h2>Editor defaults</h2>
         <div class="row">
@@ -338,7 +414,8 @@
         <div class="row"><span>Settings file</span><span class="inline"><code>{paths?.configDir}</code><button onclick={() => paths && revealItemInDir(paths.configDir)}>Show</button></span></div>
         <div class="row"><span>Screenshots</span><span class="inline"><code>{paths?.saveDir}</code><button onclick={() => paths && openPath(paths.saveDir)}>Open</button></span></div>
         <div class="row"><span>Guides</span><span class="inline"><code>{paths?.guidesDir}</code><button onclick={() => paths && openPath(paths.guidesDir)}>Open</button></span></div>
-        <p class="muted">Command line: <code>quickshot --capture region|window|fullscreen|ocr|pin|color</code>, <code>--settings</code>, <code>--guides</code>, <code>--history</code>.</p>
+        <p class="muted">Command line: <code>quickshot --capture region|window|fullscreen|ocr|pin|color|qr [--delay N]</code>, <code>--settings</code>, <code>--guides</code>, <code>--history</code>.</p>
+        <p class="muted">Scriptable capture (no windows, real exit codes): <code>quickshot --out C:\shots\ [--window "Grafana" | --monitor all | --rect x,y,w,h]</code>. Run <code>quickshot --help</code> for all options.</p>
       {/if}
 
       {#if page !== "home" && page !== "about"}

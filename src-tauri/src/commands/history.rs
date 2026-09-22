@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+use crate::diff;
 use crate::error::AppResult;
 use crate::history::{self, HistoryEntry};
 use crate::state::{AppState, Capture};
@@ -123,4 +124,21 @@ pub fn history_copy_rich(app: AppHandle, id: u64) -> AppResult<String> {
         output::ticket_caption(&settings, &entry.source, created, entry.width, entry.height);
     output::copy_rich(&app, &image, &png, &caption)?;
     Ok(caption)
+}
+
+/// Changed areas between two history captures (`a` = before, `b` = after).
+#[tauri::command(async)]
+pub fn history_diff(app: AppHandle, a: u64, b: u64) -> AppResult<diff::DiffResult> {
+    let before = history::load_image(&app, a)?;
+    let after = history::load_image(&app, b)?;
+    Ok(diff::diff(&before, &after, &diff::DiffOptions::default()))
+}
+
+/// Open the compare window, older capture as "before".
+#[tauri::command(async)]
+pub fn history_compare(app: AppHandle, a: u64, b: u64) -> AppResult<()> {
+    let (before, after) = (a.min(b), a.max(b));
+    let app2 = app.clone();
+    app.run_on_main_thread(move || windows::open_compare(&app2, before, after))?;
+    Ok(())
 }
