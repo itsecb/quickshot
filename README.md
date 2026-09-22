@@ -32,7 +32,7 @@ Linux (Ubuntu 24.04+; X11 sessions only for global hotkeys):
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
   libayatana-appindicator3-dev librsvg2-dev pkg-config libclang-dev libxcb1-dev libxrandr-dev \
-  libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev
+  libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev
 ```
 
 ```bash
