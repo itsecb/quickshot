@@ -73,8 +73,7 @@ pub fn blit(dst: &mut RgbaImage, src: &RgbaImage, dx: i64, dy: i64) {
         let sx = (x0 - dx) as usize;
         let s_start = (sy * sw as usize + sx) * 4;
         let d_start = (y as usize * dw as usize + x0 as usize) * 4;
-        dst.as_mut()[d_start..d_start + row_len]
-            .copy_from_slice(&src.as_raw()[s_start..s_start + row_len]);
+        dst[d_start..d_start + row_len].copy_from_slice(&src.as_raw()[s_start..s_start + row_len]);
     }
 }
 

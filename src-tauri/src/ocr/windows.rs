@@ -11,7 +11,7 @@ use crate::geom::Rect;
 use crate::image_util::rgba_to_bgra;
 
 fn werr(e: windows::core::Error) -> AppError {
-    AppError::Ocr(e.message().to_string())
+    AppError::Ocr(e.message())
 }
 
 fn create_engine(language: Option<&str>) -> AppResult<OcrEngine> {
@@ -64,7 +64,7 @@ pub fn recognize(img: &RgbaImage, language: Option<&str>) -> AppResult<OcrOutput
     let result = engine
         .RecognizeAsync(&bitmap)
         .map_err(werr)?
-        .get()
+        .join()
         .map_err(werr)?;
 
     let mut lines = Vec::new();
