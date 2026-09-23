@@ -25,7 +25,27 @@
 
 .toolbar .group:last-child {
   border-right: 0;
+  padding-right: 0;
+  margin-right: 0;
+}
+
+/* everything from here on sits at the right edge */
+.toolbar .group.right {
   margin-left: auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.toolbar .main-actions {
+  gap: 6px;
+}
+
+.tool.drag {
+  cursor: grab;
+}
+
+.tool.drag:active {
+  cursor: grabbing;
 }
 
 .tool {
@@ -85,9 +105,19 @@
   white-space: nowrap;
 }
 
+.action {
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+  padding: 0 12px;
+}
+
 .action:hover {
   background: var(--bg-elev-2);
-  border-color: var(--border);
+  border-color: var(--accent);
+}
+
+.action.primary:hover {
+  filter: brightness(1.08);
 }
 
 .action.primary {
@@ -187,32 +217,12 @@
   flex: 1;
 }
 
-.drag-handle {
-  cursor: grab;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-}
-
-.drag-handle:active {
-  cursor: grabbing;
-}
-
 .loading {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100vh;
   color: var(--fg-muted);
-}
-
-.action.on {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .popover-anchor {

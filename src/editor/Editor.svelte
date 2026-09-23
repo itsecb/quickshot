@@ -78,6 +78,49 @@
 
   const win = getCurrentWindow();
 
+  // Width is remembered per tool, so a thick arrow doesn't mean a thick rectangle.
+  const WIDTH_TOOLS = new Set<string>(["arrow", "line", "rect", "ellipse", "pen", "highlighter", "measure"]);
+  const WIDTHS_KEY = "quickshot.toolWidths";
+  let toolWidths: Record<string, number> = {};
+  let defaultWidth = 4;
+
+  function loadWidths() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? "{}");
+      toolWidths = saved && typeof saved === "object" ? saved : {};
+    } catch {
+      toolWidths = {};
+    }
+  }
+
+  /** The tool whose width the slider currently edits: the active drawing tool, or the selected shape's type. */
+  function widthOwner(): string | null {
+    if (tool !== "select") return WIDTH_TOOLS.has(tool) ? tool : null;
+    const shape = stage?.selectedShape();
+    return shape && WIDTH_TOOLS.has(shape.type) ? shape.type : null;
+  }
+
+  function setWidth(w: number) {
+    style.strokeWidth = Math.max(1, Math.min(40, Math.round(w)));
+    applyStyle();
+    const owner = widthOwner();
+    if (!owner) return;
+    toolWidths[owner] = style.strokeWidth;
+    try {
+      localStorage.setItem(WIDTHS_KEY, JSON.stringify(toolWidths));
+    } catch {
+      // storage unavailable: the width still applies for this session
+    }
+  }
+
+  /** Show the selected shape's own width in the toolbar without changing the shape. */
+  function showSelectedWidth() {
+    const shape = stage?.selectedShape();
+    if (!shape || !WIDTH_TOOLS.has(shape.type)) return;
+    style.strokeWidth = shape.type === "highlighter" ? Math.max(1, Math.round(shape.strokeWidth / 4)) : shape.strokeWidth;
+    stage?.syncStyle($state.snapshot(style));
+  }
+
   function showToast(text: string, isError = false) {
     toast = { text, error: isError };
     clearTimeout(toastTimer);
@@ -111,6 +154,8 @@
       };
       palette = s.palette;
       shortcuts = s.shortcuts;
+      defaultWidth = s.strokeWidth;
+      loadWidths();
       if (s.beautify) beautifyOpts = s.beautify;
       const image = await fetchRawToCanvas(init.frameUrl);
       const doc: Document = emptyDocument(image.width, image.height);
@@ -122,13 +167,15 @@
           syncHistoryFlags();
         },
         onPreview: () => {},
-        onSelect: (id) => (selectedId = id),
+        onSelect: (id) => {
+          selectedId = id;
+          if (id) showSelectedWidth();
+        },
         onStatus: (t) => (status = t),
         onZoom: (z) => (zoom = z),
       });
       stage.setBeautify($state.snapshot(beautifyOpts));
-      stage.setTool("arrow");
-      tool = "arrow";
+      setTool("arrow");
       syncHistoryFlags();
       // a per-app rule asked for this: boxes stay editable, Ctrl+Z removes them all
       if (init.autoRedact) void doRedact();
@@ -146,6 +193,10 @@
   function setTool(t: ToolId) {
     tool = t;
     stage?.setTool(t);
+    if (WIDTH_TOOLS.has(t)) {
+      style.strokeWidth = toolWidths[t] ?? defaultWidth;
+      applyStyle(); // switching to a drawing tool deselects, so no shape is changed
+    }
   }
 
   function applyStyle() {
@@ -498,13 +549,11 @@
       }
       case "[":
         e.preventDefault();
-        style.strokeWidth = Math.max(1, style.strokeWidth - 1);
-        applyStyle();
+        setWidth(style.strokeWidth - 1);
         return;
       case "]":
         e.preventDefault();
-        style.strokeWidth = Math.min(40, style.strokeWidth + 1);
-        applyStyle();
+        setWidth(style.strokeWidth + 1);
         return;
     }
 
@@ -564,11 +613,13 @@
       </div>
 
       <div class="group">
-        <label class="width" title="Stroke width ( [ and ] )">
+        {#if WIDTH_TOOLS.has(tool) || (tool === "select" && selectedId)}
+        <label class="width" title="Stroke width, remembered per tool ( [ and ] )">
           <span class="muted">Width</span>
-          <input type="range" min="1" max="30" bind:value={style.strokeWidth} onchange={applyStyle} oninput={applyStyle} />
+          <input type="range" min="1" max="30" value={style.strokeWidth} oninput={(e) => setWidth(+e.currentTarget.value)} />
           <span style="width:2ch">{style.strokeWidth}</span>
         </label>
+        {/if}
         {#if tool === "text" || selectedId}
           <label class="width" title="Font size">
             <span class="muted">Text</span>
@@ -596,14 +647,14 @@
         {/if}
       </div>
 
-      <div class="group">
-        <button class="action" onclick={doRedact} title="Auto-redact IPs, emails, hostnames, secrets… (Ctrl+Shift+X)">{@html icon("redact")} Redact</button>
+      <div class="group right" aria-label="Enhance">
+        <button class="tool" onclick={doRedact} title="Redact: pixelate IPs, emails, hostnames, secrets… (Ctrl+Shift+X)">{@html icon("redact")}</button>
         <div class="popover-anchor">
           <button
-            class="action"
-            class:on={beautifyOpts.enabled}
+            class="tool"
+            class:active={beautifyOpts.enabled}
             onclick={openBeautify}
-            title="Backdrop, padding, rounded corners, shadow (Ctrl+B toggles)">{@html icon("beautify")} Beautify</button
+            title="Beautify: backdrop, padding, rounded corners, shadow (Ctrl+B toggles)">{@html icon("beautify")}</button
           >
           {#if showBeautify}
             <div class="popover-backdrop" role="presentation" onclick={closeBeautify}></div>
@@ -628,19 +679,29 @@
             </div>
           {/if}
         </div>
-        <button class="action" onclick={doScan} title="Read QR codes / barcodes in the capture">{@html icon("qr")}</button>
+        <button class="tool" onclick={doOcr} title="Copy text from the image (OCR)">{@html icon("ocr")}</button>
+        <button class="tool" onclick={doScan} title="Read QR codes / barcodes">{@html icon("qr")}</button>
       </div>
 
-      <div class="group">
-        <button class="action primary" onclick={doCopy} title="Copy to clipboard (Ctrl+C)">{@html icon("copy")} Copy</button>
-        <button class="action" onclick={doCopyRich} title="Copy for ticket: image + caption with window, time and PC (Ctrl+Alt+C)">{@html icon("ticket")}</button>
-        <button class="action" onclick={doSave} title="Save to folder (Ctrl+S) · Save as (Ctrl+Shift+S)">{@html icon("save")} Save</button>
-        <button class="action" onclick={doPin} title="Pin to screen (Ctrl+Shift+P)">{@html icon("pin")}</button>
-        <button class="action" onclick={doOcr} title="Copy text via OCR">{@html icon("ocr")}</button>
-        <button class="action" onclick={doGuide} title="Add as next step in the guide (Ctrl+E)">{@html icon("guide")} Guide</button>
-        <div class="drag-handle" role="button" tabindex="-1" onmouseenter={prepareDrag} onmousedown={onDragStart} title="Drag the image into Teams, Outlook, a browser or Explorer">
-          {@html icon("drag")} Drag
+      <div class="group" aria-label="Share">
+        <button class="tool" onclick={doPin} title="Pin on top of everything (Ctrl+Shift+P)">{@html icon("pin")}</button>
+        <button class="tool" onclick={doGuide} title="Add as next step in the guide (Ctrl+E)">{@html icon("guide")}</button>
+        <button class="tool" onclick={doCopyRich} title="Copy for ticket: image + caption with window, time and PC (Ctrl+Alt+C)">{@html icon("ticket")}</button>
+        <div
+          class="tool drag"
+          role="button"
+          tabindex="-1"
+          onmouseenter={prepareDrag}
+          onmousedown={onDragStart}
+          title="Drag the image into Teams, Outlook, a browser or Explorer"
+        >
+          {@html icon("drag")}
         </div>
+      </div>
+
+      <div class="group main-actions">
+        <button class="action" onclick={doSave} title="Save to folder (Ctrl+S) · Save as (Ctrl+Shift+S)">{@html icon("save")} Save</button>
+        <button class="action primary" onclick={doCopy} title="Copy to clipboard (Ctrl+C)">{@html icon("copy")} Copy</button>
       </div>
     </div>
 

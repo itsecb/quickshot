@@ -328,6 +328,11 @@ export class EditorStage {
     this.updateCropMask();
   }
 
+  /** Update the current style without touching the selected shape (e.g. to show its values). */
+  syncStyle(style: Style) {
+    this.style = style;
+  }
+
   setStyle(style: Style) {
     const prev = this.style;
     this.style = style;
@@ -514,6 +519,9 @@ export class EditorStage {
       if (e.evt instanceof MouseEvent && e.evt.button !== 0) return;
       if (this.textarea) return; // let the textarea commit first
       const p = this.pointer();
+      // The text tool focuses a textarea inside this handler; without this the browser's
+      // default mousedown focus change steals focus right back, the empty box blurs and vanishes.
+      if (this.tool === "text") e.evt.preventDefault();
       if (this.tool === "select") {
         const target = e.target;
         const node = target.findAncestor(".shape", true) ?? (target.hasName("shape") ? target : null);
@@ -834,6 +842,10 @@ export class EditorStage {
     autosize();
     ta.focus();
     ta.select();
+    // belt and braces: if anything else grabbed focus during this click, take it back
+    requestAnimationFrame(() => {
+      if (this.textarea === ta && document.activeElement !== ta) ta.focus();
+    });
   }
 
   private closeTextarea(commit: boolean, shape?: TextShape, isNew = false) {
