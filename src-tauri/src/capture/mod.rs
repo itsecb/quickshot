@@ -252,74 +252,198 @@ const MAC_TOP_APP_LAYER: i32 = 17;
 /// macOS counterpart of `skip_reason`: without this a full-screen system window at a high
 /// layer wins every hover, so window mode only ever offers "the whole screen".
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn mac_skip_reason(layer: i32, alpha: f64, covers_monitor: bool) -> Option<&'static str> {
+fn mac_skip_reason(
+    layer: i32,
+    alpha: f64,
+    covers_monitor: bool,
+    titled: bool,
+) -> Option<&'static str> {
     if alpha < 0.05 {
         Some("invisible")
     } else if !(0..=MAC_TOP_APP_LAYER).contains(&layer) {
         Some("system layer (menu bar, Dock, overlays)")
     } else if layer != 0 && covers_monitor {
         Some("full-screen floating window")
+    } else if covers_monitor && !titled {
+        // real full-screen app windows have a title; untitled screen-sized ones are helpers
+        // (share borders, overlays) that would otherwise win every hover
+        Some("untitled full-screen window")
     } else {
         None
     }
 }
 
-/// Layer, alpha and owner of every on-screen window (macOS), keyed by window number.
+/// One on-screen window as the macOS window server reports it (logical points, top-left origin).
 #[cfg(target_os = "macos")]
-fn mac_window_props() -> HashMap<u32, (i32, f64, String)> {
+struct MacWindow {
+    id: u32,
+    pid: i32,
+    layer: i32,
+    alpha: f64,
+    owner: String,
+    title: String,
+    bounds: (f64, f64, f64, f64),
+}
+
+/// Every on-screen window, topmost first, in a single window-server call. (xcap re-reads the
+/// whole list for each property of each window, which made the list take seconds on a Mac.)
+#[cfg(target_os = "macos")]
+fn mac_windows() -> Vec<MacWindow> {
     use objc2_core_foundation::{CFDictionary, CFNumber, CFNumberType, CFString};
     use objc2_core_graphics::{
-        kCGWindowAlpha, kCGWindowLayer, kCGWindowNumber, kCGWindowOwnerName,
-        CGWindowListCopyWindowInfo, CGWindowListOption,
+        kCGWindowAlpha, kCGWindowBounds, kCGWindowLayer, kCGWindowName, kCGWindowNumber,
+        kCGWindowOwnerName, kCGWindowOwnerPID, CGWindowListCopyWindowInfo, CGWindowListOption,
     };
     use std::ffi::c_void;
 
-    let mut out = HashMap::new();
+    let mut out = Vec::new();
     let Some(list) = CGWindowListCopyWindowInfo(
         CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
         0,
     ) else {
         return out;
     };
-    // SAFETY: the array holds CFDictionary values; the keys are CoreGraphics constants and each
-    // value is read as its documented type (numbers via CFNumberGetValue, owner as CFString).
+    // SAFETY: the array holds CFDictionary values; the keys are CoreGraphics constants (or
+    // CFStrings we made) and each value is read as its documented type.
     unsafe {
         let get =
             |d: &CFDictionary, key: &CFString| d.value(key as *const CFString as *const c_void);
-        let number = |d: &CFDictionary, key: &CFString, ty: CFNumberType, out: *mut c_void| {
+        let int = |d: &CFDictionary, key: &CFString| {
             let n = get(d, key) as *const CFNumber;
-            !n.is_null() && (*n).value(ty, out)
+            let mut v = 0i64;
+            (!n.is_null()
+                && (*n).value(CFNumberType::SInt64Type, &mut v as *mut i64 as *mut c_void))
+            .then_some(v)
         };
-        for i in 0..list.count() {
-            let d = list.value_at_index(i) as *const CFDictionary;
-            let Some(d) = d.as_ref() else { continue };
-            let (mut id, mut layer, mut alpha) = (0i32, 0i32, 1f64);
-            if !number(
-                d,
-                kCGWindowNumber,
-                CFNumberType::IntType,
-                &mut id as *mut i32 as *mut c_void,
-            ) {
-                continue;
-            }
-            number(
-                d,
-                kCGWindowLayer,
-                CFNumberType::IntType,
-                &mut layer as *mut i32 as *mut c_void,
-            );
-            number(
-                d,
-                kCGWindowAlpha,
-                CFNumberType::DoubleType,
-                &mut alpha as *mut f64 as *mut c_void,
-            );
-            let owner = (get(d, kCGWindowOwnerName) as *const CFString)
+        let float = |d: &CFDictionary, key: &CFString| {
+            let n = get(d, key) as *const CFNumber;
+            let mut v = 0f64;
+            (!n.is_null()
+                && (*n).value(CFNumberType::DoubleType, &mut v as *mut f64 as *mut c_void))
+            .then_some(v)
+        };
+        let text = |d: &CFDictionary, key: &CFString| {
+            (get(d, key) as *const CFString)
                 .as_ref()
                 .map(|s| s.to_string())
-                .unwrap_or_default();
-            out.insert(id as u32, (layer, alpha, owner));
+                .unwrap_or_default()
+        };
+        let (kx, ky, kw, kh) = (
+            CFString::from_static_str("X"),
+            CFString::from_static_str("Y"),
+            CFString::from_static_str("Width"),
+            CFString::from_static_str("Height"),
+        );
+        for i in 0..list.count() {
+            let Some(d) = (list.value_at_index(i) as *const CFDictionary).as_ref() else {
+                continue;
+            };
+            let Some(id) = int(d, kCGWindowNumber) else {
+                continue;
+            };
+            let Some(b) = (get(d, kCGWindowBounds) as *const CFDictionary).as_ref() else {
+                continue;
+            };
+            let bounds = (
+                float(b, &kx).unwrap_or(0.0),
+                float(b, &ky).unwrap_or(0.0),
+                float(b, &kw).unwrap_or(0.0),
+                float(b, &kh).unwrap_or(0.0),
+            );
+            out.push(MacWindow {
+                id: id as u32,
+                pid: int(d, kCGWindowOwnerPID).unwrap_or(0) as i32,
+                layer: int(d, kCGWindowLayer).unwrap_or(0) as i32,
+                alpha: float(d, kCGWindowAlpha).unwrap_or(1.0),
+                owner: text(d, kCGWindowOwnerName),
+                title: text(d, kCGWindowName),
+                bounds,
+            });
         }
+    }
+    out
+}
+
+/// Process that owns a window (macOS), for Accessibility lookups.
+#[cfg(target_os = "macos")]
+pub fn mac_window_pid(id: u32) -> Option<i32> {
+    mac_windows()
+        .into_iter()
+        .find(|w| w.id == id)
+        .map(|w| w.pid)
+}
+
+/// Map logical points (global, top-left origin) to our global physical pixels: each monitor is
+/// logical × its own scale (see `monitors::to_physical`), so use the scale of the monitor the
+/// point is on.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn scale_at_logical(monitors: &[MonitorInfo], x: f64, y: f64) -> f64 {
+    monitors
+        .iter()
+        .find(|m| {
+            let s = m.scale.max(0.1);
+            let (mx, my) = (m.x as f64 / s, m.y as f64 / s);
+            x >= mx && y >= my && x < mx + m.width as f64 / s && y < my + m.height as f64 / s
+        })
+        .or_else(|| monitors.iter().find(|m| m.is_primary))
+        .map(|m| m.scale.max(0.1))
+        .unwrap_or(1.0)
+}
+
+/// Scale of the monitor containing a global physical point.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn scale_at_physical(monitors: &[MonitorInfo], x: i32, y: i32) -> f64 {
+    monitors
+        .iter()
+        .find(|m| m.rect().contains(x, y))
+        .or_else(|| monitors.iter().find(|m| m.is_primary))
+        .map(|m| m.scale.max(0.1))
+        .unwrap_or(1.0)
+}
+
+#[cfg(target_os = "macos")]
+fn list_windows_mac(monitors: &[MonitorInfo], verbose: bool) -> Vec<WindowInfo> {
+    let screens: Vec<Rect> = monitors.iter().map(|m| m.rect()).collect();
+    let screen = Rect::union_all(screens.iter().copied()).unwrap_or_default();
+    let own = std::process::id() as i32;
+    let all = mac_windows();
+    let count = all.len() as i32;
+    let mut out = Vec::new();
+    for (index, w) in all.into_iter().enumerate() {
+        let (bx, by, bw, bh) = w.bounds;
+        if w.pid == own || bw < 20.0 || bh < 20.0 {
+            continue;
+        }
+        let s = scale_at_logical(monitors, bx + bw / 2.0, by + bh / 2.0);
+        let rect = Rect::new(
+            (bx * s).round() as i32,
+            (by * s).round() as i32,
+            (bw * s).round() as u32,
+            (bh * s).round() as u32,
+        );
+        if rect.intersect(&screen).is_none() {
+            continue;
+        }
+        let covers = covers_a_monitor(&rect, &screens);
+        if let Some(reason) = mac_skip_reason(w.layer, w.alpha, covers, !w.title.is_empty()) {
+            if verbose {
+                log::info!(
+                    "window skipped ({reason}): {:?} owner={:?} layer={} alpha={} rect={rect:?}",
+                    w.title,
+                    w.owner,
+                    w.layer,
+                    w.alpha
+                );
+            }
+            continue;
+        }
+        out.push(WindowInfo {
+            id: w.id,
+            title: w.title,
+            app_name: w.owner,
+            rect,
+            z: count - index as i32,
+        });
     }
     out
 }
@@ -336,7 +460,29 @@ fn covers_a_monitor(rect: &Rect, screens: &[Rect]) -> bool {
 
 /// Capturable top-level windows, topmost first. `verbose` logs every candidate and every
 /// skipped window with the reason (window mode), so a log shows what detection saw.
-pub fn list_windows(screens: &[Rect], verbose: bool) -> Vec<WindowInfo> {
+pub fn list_windows(monitors: &[MonitorInfo], verbose: bool) -> Vec<WindowInfo> {
+    #[cfg(target_os = "macos")]
+    let out = list_windows_mac(monitors, verbose);
+    #[cfg(not(target_os = "macos"))]
+    let out = list_windows_xcap(monitors, verbose);
+    if verbose {
+        for w in &out {
+            log::info!(
+                "window candidate z={} {:?} app={:?} rect={:?}",
+                w.z,
+                w.title,
+                w.app_name,
+                w.rect
+            );
+        }
+    }
+    out
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn list_windows_xcap(monitors: &[MonitorInfo], verbose: bool) -> Vec<WindowInfo> {
+    let screens: Vec<Rect> = monitors.iter().map(|m| m.rect()).collect();
+    let screens = screens.as_slice();
     let windows = match xcap::Window::all() {
         Ok(w) => w,
         Err(e) => {
@@ -348,8 +494,6 @@ pub fn list_windows(screens: &[Rect], verbose: bool) -> Vec<WindowInfo> {
     let count = windows.len() as i32;
     // looking up an app name opens the process; many windows share one
     let mut app_names: HashMap<u32, String> = HashMap::new();
-    #[cfg(target_os = "macos")]
-    let mac_props = mac_window_props();
     let mut out = Vec::new();
     for (index, w) in windows.into_iter().enumerate() {
         let id = w.id().unwrap_or(0);
@@ -412,18 +556,6 @@ pub fn list_windows(screens: &[Rect], verbose: bool) -> Vec<WindowInfo> {
                 continue;
             }
         }
-        #[cfg(target_os = "macos")]
-        if let Some((layer, alpha, owner)) = mac_props.get(&id) {
-            if let Some(reason) = mac_skip_reason(*layer, *alpha, covers_a_monitor(&rect, screens))
-            {
-                if verbose {
-                    log::info!(
-                        "window skipped ({reason}): {title:?} app={app_name:?} owner={owner:?} layer={layer} alpha={alpha} rect={rect:?}"
-                    );
-                }
-                continue;
-            }
-        }
         // xcap lists windows top-most first on Windows (EnumWindows) and macOS
         // (CGWindowListCopyWindowInfo), so the position is the z-order; w.z() would
         // re-enumerate every window for each call.
@@ -437,17 +569,6 @@ pub fn list_windows(screens: &[Rect], verbose: bool) -> Vec<WindowInfo> {
         });
     }
     out.sort_by_key(|w| std::cmp::Reverse(w.z));
-    if verbose {
-        for w in &out {
-            log::info!(
-                "window candidate z={} {:?} app={:?} rect={:?}",
-                w.z,
-                w.title,
-                w.app_name,
-                w.rect
-            );
-        }
-    }
     out
 }
 
@@ -615,9 +736,9 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
     // the window list doesn't depend on the pixels: build it while the screens are grabbed
     let overlay_mode = !matches!(mode, CaptureMode::Fullscreen | CaptureMode::RepeatLast);
     let windows = overlay_mode.then(|| {
-        let screens: Vec<Rect> = quick_monitors().iter().map(|m| m.rect()).collect();
+        let monitors = quick_monitors();
         let verbose = mode == CaptureMode::Window;
-        std::thread::spawn(move || list_windows(&screens, verbose))
+        std::thread::spawn(move || list_windows(&monitors, verbose))
     });
     let started = Instant::now();
     let frames = capture_all_monitors()?;
@@ -639,7 +760,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
             let rect = source.rect;
             fill_app(
                 &mut source,
-                window_at_center(&list_windows(&screens_of(&frames), false), rect),
+                window_at_center(&list_windows(&monitors_of(&frames), false), rect),
             );
             let capture = state.insert_capture(app, frame.image.clone(), source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
@@ -658,7 +779,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
             };
             fill_app(
                 &mut source,
-                window_at_center(&list_windows(&screens_of(&frames), false), rect),
+                window_at_center(&list_windows(&monitors_of(&frames), false), rect),
             );
             let capture = state.insert_capture(app, image, source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
@@ -667,8 +788,8 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
     }
 }
 
-fn screens_of(frames: &[CaptureFrame]) -> Vec<Rect> {
-    frames.iter().map(|f| f.monitor.rect()).collect()
+fn monitors_of(frames: &[CaptureFrame]) -> Vec<MonitorInfo> {
+    frames.iter().map(|f| f.monitor.clone()).collect()
 }
 
 /// `windows`: the window list, already being built alongside the screen grab.
@@ -681,9 +802,9 @@ fn begin_overlay(
     let state = app.state::<AppState>();
     // don't wait for the window list: the overlays open without it and get it when it's done
     let job = windows.unwrap_or_else(|| {
-        let screens = screens_of(&frames);
+        let monitors = monitors_of(&frames);
         let verbose = mode == CaptureMode::Window;
-        std::thread::spawn(move || list_windows(&screens, verbose))
+        std::thread::spawn(move || list_windows(&monitors, verbose))
     });
     let monitors: Vec<MonitorInfo> = frames.iter().map(|f| f.monitor.clone()).collect();
     let labels: Vec<String> = monitors.iter().map(|m| overlay::label_for(m.id)).collect();
@@ -744,12 +865,82 @@ pub fn overlay_ready(app: &AppHandle, label: &str) -> AppResult<()> {
         session.shown = true;
         let labels = session.labels.clone();
         let screens: Vec<Rect> = session.frames.iter().map(|f| f.monitor.rect()).collect();
+        let monitors = monitors_of(&session.frames);
         let focus = focus_label(app, session);
         drop(guard);
         overlay::show_all(app, &labels, focus.as_deref());
+        follow_pointer(app, labels.clone(), monitors);
         watch_foreground(app, labels, screens);
     }
     Ok(())
+}
+
+/// Pointer position pushed to an overlay that just got focus: global physical px.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const POINTER_EVENT: &str = "overlay://pointer";
+
+/// macOS only sends mouse movement to the focused (key) window, so the overlay on another
+/// screen stayed dead until clicked, and that click captured the whole screen. While the
+/// overlays are up, focus the one under the pointer as soon as it crosses screens and hand it
+/// the position, so the highlight follows seamlessly. (Windows delivers movement to whatever
+/// is under the pointer; there the page focuses itself on mouseenter.)
+fn follow_pointer(app: &AppHandle, labels: Vec<String>, monitors: Vec<MonitorInfo>) {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
+        }
+        const COMBINED_SESSION_STATE: i32 = 0;
+        const LEFT_BUTTON: u32 = 0;
+        let app = app.clone();
+        std::thread::spawn(move || {
+            // tao reports the pointer as logical points × the main display's scale
+            let main_scale = monitors
+                .iter()
+                .find(|m| m.is_primary)
+                .map(|m| m.scale.max(0.1))
+                .unwrap_or(1.0);
+            let mut current: Option<u32> = None;
+            loop {
+                std::thread::sleep(Duration::from_millis(16));
+                let active = app
+                    .state::<AppState>()
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|s| s.labels == labels);
+                if !active {
+                    return;
+                }
+                // SAFETY: a plain query of the global mouse button state.
+                if unsafe { CGEventSourceButtonState(COMBINED_SESSION_STATE, LEFT_BUTTON) } {
+                    continue; // mid-drag: the window that got the press keeps the drag
+                }
+                let Ok(p) = app.cursor_position() else {
+                    continue;
+                };
+                let (lx, ly) = (p.x / main_scale, p.y / main_scale);
+                let s = scale_at_logical(&monitors, lx, ly);
+                let (px, py) = ((lx * s).round() as i32, (ly * s).round() as i32);
+                let Some(m) = monitors.iter().find(|m| m.rect().contains(px, py)) else {
+                    continue;
+                };
+                if current == Some(m.id) {
+                    continue;
+                }
+                current = Some(m.id);
+                let label = overlay::label_for(m.id);
+                if let Some(w) = app.get_webview_window(&label) {
+                    let _ = w.set_focus();
+                    let _ = w.emit_to(label.as_str(), POINTER_EVENT, (px, py));
+                }
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, labels, monitors);
 }
 
 /// If another app's full-screen overlay takes over while ours are up, close ours. On Windows
@@ -975,14 +1166,16 @@ mod tests {
         assert!(skip_reason(&style(0x100, None, "Chrome_WidgetWin_1"), true).is_none());
         assert!(skip_reason(&style(0x8, None, "Notepad"), false).is_none());
         // macOS: normal windows and floating palettes stay; system layers and ghosts go
-        assert!(mac_skip_reason(0, 1.0, false).is_none());
-        assert!(mac_skip_reason(0, 1.0, true).is_none()); // a maximised app window
-        assert!(mac_skip_reason(3, 1.0, false).is_none());
-        assert!(mac_skip_reason(3, 1.0, true).is_some());
-        assert!(mac_skip_reason(25, 1.0, false).is_some()); // menu bar / status items
-        assert!(mac_skip_reason(20, 1.0, true).is_some()); // Dock
-        assert!(mac_skip_reason(0, 0.0, true).is_some());
-        assert!(mac_skip_reason(-2147483624, 1.0, true).is_some());
+        assert!(mac_skip_reason(0, 1.0, false, true).is_none());
+        assert!(mac_skip_reason(0, 1.0, true, true).is_none()); // a maximised app window
+        assert!(mac_skip_reason(3, 1.0, false, true).is_none());
+        assert!(mac_skip_reason(3, 1.0, true, true).is_some());
+        assert!(mac_skip_reason(25, 1.0, false, true).is_some()); // menu bar / status items
+        assert!(mac_skip_reason(20, 1.0, true, true).is_some()); // Dock
+        assert!(mac_skip_reason(0, 0.0, true, true).is_some());
+        assert!(mac_skip_reason(-2147483624, 1.0, true, true).is_some());
+        assert!(mac_skip_reason(0, 1.0, true, false).is_some()); // untitled screen-sized helper
+        assert!(mac_skip_reason(0, 1.0, false, false).is_none()); // untitled small window
         assert!(skip_reason(&style(0x8_0000, Some(230), "ConsoleWindowClass"), false).is_none());
         assert!(skip_reason(&style(0x80 | 0x8, None, "Shell_TrayWnd"), false).is_none());
     }

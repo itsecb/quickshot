@@ -60,8 +60,8 @@ pub fn overlay_ready(app: AppHandle, label: String) -> AppResult<()> {
 
 /// An overlay page is idle and listening for the next capture (see `overlay::open`).
 #[tauri::command]
-pub fn overlay_idle(label: String) {
-    overlay::mark_idle(&label);
+pub fn overlay_idle(app: AppHandle, label: String) {
+    overlay::idle(&app, &label);
 }
 
 #[tauri::command(async)]

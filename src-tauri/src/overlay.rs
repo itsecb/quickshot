@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use crate::capture::MonitorInfo;
 use crate::error::AppResult;
 use crate::geom::Rect;
+use crate::state::AppState;
 
 pub fn label_for(monitor_id: u32) -> String {
     format!("overlay-{monitor_id}")
@@ -122,7 +123,7 @@ fn forget(label: &str) {
 
 /// The page is idle and listening (just loaded warm, or reset after a capture): it can be
 /// reused for the next capture.
-pub fn mark_idle(label: &str) {
+fn mark_idle(label: &str) {
     if let Some(rect) = with(&BUILT, |b| b.get(label).copied()) {
         with(&POOL, |p| p.insert(label.to_string(), rect));
     }
@@ -143,11 +144,44 @@ pub fn show_all(app: &AppHandle, labels: &[String], focus: Option<&str>) {
 }
 
 /// End of a capture: hide the overlays at once and let their pages reset for the next one.
+///
+/// The page clears itself first (it's see-through, so that's invisible) and then reports idle,
+/// which hides the window: hidden with the old picture still in it, a reused overlay could
+/// flash the previous capture (a "phantom outline") when shown again.
 pub fn release(app: &AppHandle, labels: &[String]) {
     for label in labels {
         if let Some(w) = app.get_webview_window(label) {
-            let _ = w.hide();
             let _ = w.emit_to(label.as_str(), RESET_EVENT, ());
+        }
+    }
+    // a page that doesn't answer still gets out of the way
+    let (app, labels) = (app.clone(), labels.to_vec());
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        for label in &labels {
+            hide_unless_in_use(&app, label);
+        }
+    });
+}
+
+/// The page has cleared itself and is listening for the next capture.
+pub fn idle(app: &AppHandle, label: &str) {
+    mark_idle(label);
+    hide_unless_in_use(app, label);
+}
+
+/// Hide an overlay, unless a newer capture is already using it.
+fn hide_unless_in_use(app: &AppHandle, label: &str) {
+    let in_use = app
+        .state::<AppState>()
+        .session
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|s| s.labels.iter().any(|l| l == label));
+    if !in_use {
+        if let Some(w) = app.get_webview_window(label) {
+            let _ = w.hide();
         }
     }
 }

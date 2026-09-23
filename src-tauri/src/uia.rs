@@ -1,5 +1,6 @@
 //! UI element detection for the capture overlay (Snagit-style): the nested parts of a window
-//! under the pointer (panes, toolbars, dialogs, buttons…) via Windows UI Automation.
+//! under the pointer (panes, toolbars, dialogs, buttons…) via Windows UI Automation, or the
+//! Accessibility API on macOS.
 //!
 //! We never hit-test the screen (that would find our own overlay): starting from the window
 //! the user is hovering, we walk *down* its element tree, always into the smallest visible
@@ -20,12 +21,180 @@ pub fn element_label(x: i32, y: i32) -> Option<(String, String)> {
     imp::element_label(x, y)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 mod imp {
     use crate::geom::Rect;
 
     pub fn element_chain(_window_id: u32, _x: i32, _y: i32) -> Vec<Rect> {
         Vec::new()
+    }
+
+    pub fn element_label(_x: i32, _y: i32) -> Option<(String, String)> {
+        None
+    }
+}
+
+/// macOS: the Accessibility API. Hit-testing the *application* that owns the hovered window
+/// (not the whole screen, where our overlay is on top) gives the innermost element under the
+/// point; walking up its parents to the window gives the chain. Needs the Accessibility
+/// permission, asked for once per run.
+#[cfg(target_os = "macos")]
+mod imp {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFString};
+
+    use crate::capture::{quick_monitors, scale_at_physical};
+    use crate::geom::Rect;
+
+    type Ref = *const c_void;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Point {
+        x: f64,
+        y: f64,
+    }
+
+    const AX_VALUE_CGPOINT: u32 = 1;
+    const AX_VALUE_CGSIZE: u32 = 2;
+    const MAX_DEPTH: usize = 40;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: Ref) -> bool;
+        fn AXUIElementCreateApplication(pid: i32) -> Ref;
+        fn AXUIElementCopyElementAtPosition(app: Ref, x: f32, y: f32, element: *mut Ref) -> i32;
+        fn AXUIElementCopyAttributeValue(element: Ref, attribute: Ref, value: *mut Ref) -> i32;
+        fn AXUIElementSetMessagingTimeout(element: Ref, seconds: f32) -> i32;
+        fn AXValueGetValue(value: Ref, the_type: u32, out: *mut c_void) -> bool;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(cf: Ref);
+    }
+
+    /// A CoreFoundation object we own (released on drop).
+    struct Owned(Ref);
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: we hold one reference from a Create/Copy call.
+                unsafe { CFRelease(self.0) };
+            }
+        }
+    }
+
+    fn attr(element: Ref, name: &str) -> Option<Owned> {
+        let key = CFString::from_str(name);
+        let mut value: Ref = std::ptr::null();
+        // SAFETY: `element` is a live AXUIElement; on success we own `value`.
+        let err = unsafe {
+            AXUIElementCopyAttributeValue(element, &*key as *const CFString as Ref, &mut value)
+        };
+        (err == 0 && !value.is_null()).then_some(Owned(value))
+    }
+
+    fn role(element: Ref) -> String {
+        attr(element, "AXRole")
+            // SAFETY: AXRole is a CFString.
+            .map(|v| unsafe { (*(v.0 as *const CFString)).to_string() })
+            .unwrap_or_default()
+    }
+
+    /// Frame in logical points (global, top-left origin).
+    fn frame(element: Ref) -> Option<(f64, f64, f64, f64)> {
+        let (mut pos, mut size) = (Point::default(), Point::default());
+        let p = attr(element, "AXPosition")?;
+        let s = attr(element, "AXSize")?;
+        // SAFETY: AXPosition / AXSize are AXValues holding a CGPoint / CGSize (two f64s).
+        let ok = unsafe {
+            AXValueGetValue(p.0, AX_VALUE_CGPOINT, &mut pos as *mut Point as *mut c_void)
+                && AXValueGetValue(s.0, AX_VALUE_CGSIZE, &mut size as *mut Point as *mut c_void)
+        };
+        (ok && size.x > 0.0 && size.y > 0.0).then_some((pos.x, pos.y, size.x, size.y))
+    }
+
+    fn trusted() -> bool {
+        static ASKED: AtomicBool = AtomicBool::new(false);
+        // SAFETY: plain queries; the options dictionary lives across the call.
+        unsafe {
+            if AXIsProcessTrusted() {
+                return true;
+            }
+            if !ASKED.swap(true, Ordering::SeqCst) {
+                log::info!("Accessibility permission missing: asking (needed for window parts)");
+                let key = CFString::from_static_str("AXTrustedCheckOptionPrompt");
+                let options = CFDictionary::from_slices(&[&*key], &[CFBoolean::new(true)]);
+                AXIsProcessTrustedWithOptions(&*options as *const _ as Ref);
+            }
+        }
+        false
+    }
+
+    pub fn element_chain(window_id: u32, x: i32, y: i32) -> Vec<Rect> {
+        if !trusted() {
+            return Vec::new();
+        }
+        let Some(pid) = crate::capture::mac_window_pid(window_id) else {
+            return Vec::new();
+        };
+        let monitors = quick_monitors();
+        let scale = scale_at_physical(&monitors, x, y);
+        let (lx, ly) = (x as f64 / scale, y as f64 / scale);
+        // SAFETY: AX calls on objects we own for the duration of the walk.
+        let mut rects = unsafe {
+            let app = Owned(AXUIElementCreateApplication(pid));
+            if app.0.is_null() {
+                return Vec::new();
+            }
+            // an unresponsive app must not stall the overlay
+            AXUIElementSetMessagingTimeout(app.0, 0.2);
+            let mut hit: Ref = std::ptr::null();
+            if AXUIElementCopyElementAtPosition(app.0, lx as f32, ly as f32, &mut hit) != 0
+                || hit.is_null()
+            {
+                return Vec::new();
+            }
+            let mut current = Owned(hit);
+            let mut rects = Vec::new();
+            for _ in 0..MAX_DEPTH {
+                let r = role(current.0);
+                if r == "AXApplication" {
+                    break;
+                }
+                if let Some(f) = frame(current.0) {
+                    rects.push(f);
+                }
+                if r == "AXWindow" {
+                    break;
+                }
+                match attr(current.0, "AXParent") {
+                    Some(parent) => current = parent,
+                    None => break,
+                }
+            }
+            rects
+        };
+        rects.reverse(); // window first
+        let mut out: Vec<Rect> = Vec::with_capacity(rects.len());
+        for (fx, fy, fw, fh) in rects {
+            let r = Rect::new(
+                (fx * scale).round() as i32,
+                (fy * scale).round() as i32,
+                (fw * scale).round() as u32,
+                (fh * scale).round() as u32,
+            );
+            // same rect as its parent (wrappers): one step of the wheel for nothing
+            if out.last() != Some(&r) {
+                out.push(r);
+            }
+        }
+        out
     }
 
     pub fn element_label(_x: i32, _y: i32) -> Option<(String, String)> {

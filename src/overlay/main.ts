@@ -381,14 +381,28 @@ class Overlay {
     window.addEventListener(
       "blur",
       () => {
-        // keyboard focus moved to another overlay; keep our visuals but drop hover
+        // focus moved to another overlay (the pointer went to another screen): drop our
+        // hover, crosshair and magnifier so nothing lingers here
         if (!this.dragStart) {
           this.hoverWindow = null;
+          this.cursor = null;
           this.schedule();
         }
       },
       { signal },
     );
+    // macOS: Rust focuses us when the pointer arrives from another screen, and says where it is
+    // (mouse movement only reaches the focused window there)
+    void listen<[number, number]>("overlay://pointer", (ev) => {
+      if (this.dragStart || this.finished) return;
+      const [x, y] = ev.payload;
+      this.cursor = { x: x - this.init.monitor.x, y: y - this.init.monitor.y };
+      if (this.init.mode !== "color") {
+        this.hoverWindow = this.windowAt({ x, y });
+        this.queueElementQuery({ x, y });
+      }
+      this.schedule();
+    }).then((u) => (this.disposed ? u() : this.unlisten.push(u)));
     void listen<{ from: string; rect: Rect | null }>("overlay://selection", (ev) => {
       if (ev.payload.from === label) return;
       this.remoteSelection = ev.payload.rect;
@@ -670,16 +684,6 @@ class Overlay {
       }
     }
 
-    // ghost of the last region
-    if (this.init.lastRegion && !active) {
-      const l = this.toLocalRect(this.init.lastRegion);
-      ctx.setLineDash([6 * dpr, 4 * dpr]);
-      ctx.strokeStyle = "rgba(255,255,255,0.45)";
-      ctx.lineWidth = dpr;
-      ctx.strokeRect(l.x + 0.5, l.y + 0.5, l.width - 1, l.height - 1);
-      ctx.setLineDash([]);
-    }
-
     // capture flash
     const flash = this.flashStart ? Math.min(1, (now - this.flashStart) / FLASH_MS) : 1;
     if (flash < 1 && vis) {
@@ -947,7 +951,17 @@ function run() {
 function reset() {
   current?.dispose();
   current = null;
-  void overlayIdle(label);
+  // the page is empty (see-through) now; let that reach the screen before Rust hides the
+  // window, so a reused overlay never shows its previous picture when it reappears
+  // (frames don't tick in a hidden window: the timer covers that)
+  let reported = false;
+  const report = () => {
+    if (reported) return;
+    reported = true;
+    void overlayIdle(label);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(report));
+  setTimeout(report, 120);
 }
 
 void Promise.all([listen("overlay://start", run), listen("overlay://reset", reset)]).then(() => {
