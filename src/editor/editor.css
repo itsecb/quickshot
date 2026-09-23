@@ -334,9 +334,16 @@
 }
 
 /* narrow editor: Save/Copy become icon buttons instead of wrapping the toolbar */
-@container (max-width: 940px) {
+@container (max-width: 1100px) {
   .main-actions .label {
     display: none;
+  }
+}
+
+/* still narrower: slightly slimmer tool buttons so 15 tools + actions fit one row */
+@container (max-width: 1000px) {
+  .toolbar .tool {
+    width: 30px;
   }
 }
 

@@ -17,6 +17,7 @@ mod redact;
 mod rules;
 mod settings;
 mod state;
+mod table;
 mod ticket;
 mod tray;
 mod uia;
@@ -183,6 +184,7 @@ pub fn run() {
             commands::output::redact_capture,
             commands::output::scan_codes,
             commands::output::copy_image_rich,
+            commands::output::copy_table,
             commands::output::thumb_init,
             commands::output::thumb_action,
             commands::output::thumb_drag_path,

@@ -175,7 +175,7 @@ fn copy(img: &RgbaImage, bytes: &[u8], format: Format) {
             Format::Png => Ok(bytes.to_vec()),
             Format::Jpeg => crate::image_util::encode_png(img),
         };
-        let result = png.and_then(|p| output::write_clipboard_windows(img, &p, None, None));
+        let result = png.and_then(|p| output::write_clipboard_windows(Some((img, &p)), None, None));
         if let Err(e) = result {
             eprintln!("quickshot: copy to clipboard failed: {e}");
         }

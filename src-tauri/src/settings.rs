@@ -122,6 +122,9 @@ impl Default for EditorDefaults {
             ("badge", "n"),
             ("crop", "c"),
             ("measure", "m"),
+            ("spotlight", "s"),
+            ("magnify", "z"),
+            ("callout", "k"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -224,10 +227,24 @@ fn settings_path(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(dir.join("settings.json"))
 }
 
+/// Tools added in later versions get their default shortcut even when a saved settings file
+/// already has a (then complete) shortcut map. Keys the user already uses aren't taken.
+fn add_missing_shortcuts(settings: &mut Settings) {
+    for (tool, key) in EditorDefaults::default().shortcuts {
+        let taken = settings.editor.shortcuts.values().any(|k| k == &key);
+        if !settings.editor.shortcuts.contains_key(&tool) && !taken {
+            settings.editor.shortcuts.insert(tool, key);
+        }
+    }
+}
+
 pub fn load(app: &AppHandle) -> Settings {
     match settings_path(app).and_then(|p| Ok(std::fs::read_to_string(p)?)) {
         Ok(text) => match serde_json::from_str::<Settings>(&text) {
-            Ok(s) => s,
+            Ok(mut s) => {
+                add_missing_shortcuts(&mut s);
+                s
+            }
             Err(e) => {
                 log::warn!("settings.json is invalid, using defaults: {e}");
                 Settings::default()
@@ -298,6 +315,23 @@ mod tests {
     #[test]
     fn pattern_empty_falls_back() {
         assert_eq!(expand_pattern("???", "", "", 1, 1), "Screenshot");
+    }
+
+    #[test]
+    fn new_tools_get_shortcuts_without_stealing_keys() {
+        let mut s: Settings =
+            serde_json::from_str(r#"{"editor":{"shortcuts":{"arrow":"a","rect":"s"}}}"#).unwrap();
+        add_missing_shortcuts(&mut s);
+        assert_eq!(
+            s.editor.shortcuts.get("magnify").map(String::as_str),
+            Some("z")
+        );
+        // "s" is already the user's rectangle key: spotlight stays unbound
+        assert!(!s.editor.shortcuts.contains_key("spotlight"));
+        assert_eq!(
+            s.editor.shortcuts.get("rect").map(String::as_str),
+            Some("s")
+        );
     }
 
     #[test]

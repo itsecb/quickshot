@@ -217,7 +217,7 @@ pub fn copy_rich(app: &AppHandle, img: &RgbaImage, png: &[u8], caption: &str) ->
     #[cfg(windows)]
     {
         let _ = app;
-        write_clipboard_windows(img, png, Some(&html), Some(caption))
+        write_clipboard_windows(Some((img, png)), Some(&html), Some(caption))
     }
     #[cfg(not(windows))]
     {
@@ -228,12 +228,11 @@ pub fn copy_rich(app: &AppHandle, img: &RgbaImage, png: &[u8], caption: &str) ->
     }
 }
 
-/// One clipboard write with PNG + CF_DIB, plus optional HTML and plain text, so every app
-/// finds a format it likes. Also used by headless `--copy`, which has no Tauri runtime.
+/// One clipboard write with an optional image (PNG + CF_DIB), HTML and plain text, so every
+/// app finds a format it likes. Also used by headless `--copy`, which has no Tauri runtime.
 #[cfg(windows)]
 pub fn write_clipboard_windows(
-    img: &RgbaImage,
-    png: &[u8],
+    image: Option<(&RgbaImage, &[u8])>,
     html: Option<&str>,
     text: Option<&str>,
 ) -> AppResult<()> {
@@ -242,10 +241,12 @@ pub fn write_clipboard_windows(
     let err = |e: clipboard_win::ErrorCode| AppError::Other(format!("clipboard: {e}"));
     let _open = Clipboard::new_attempts(10).map_err(err)?;
     raw::empty().map_err(err)?;
-    if let Some(png_format) = raw::register_format("PNG") {
-        raw::set_without_clear(png_format.get(), png).map_err(err)?;
+    if let Some((img, png)) = image {
+        if let Some(png_format) = raw::register_format("PNG") {
+            raw::set_without_clear(png_format.get(), png).map_err(err)?;
+        }
+        raw::set_without_clear(formats::CF_DIB, &ticket::dib(img)).map_err(err)?;
     }
-    raw::set_without_clear(formats::CF_DIB, &ticket::dib(img)).map_err(err)?;
     if let (Some(html), Some(html_format)) = (html, raw::register_format("HTML Format")) {
         raw::set_html_with(html_format.get(), html, NoClear).map_err(err)?;
     }
@@ -253,6 +254,22 @@ pub fn write_clipboard_windows(
         raw::set_string_with(text, NoClear).map_err(err)?;
     }
     Ok(())
+}
+
+/// Rich text for the clipboard: HTML (tables keep their cells in Excel/Outlook) plus a plain
+/// text fallback (TSV pastes into cells too).
+pub fn copy_html_text(app: &AppHandle, html: &str, text: &str) -> AppResult<()> {
+    #[cfg(windows)]
+    {
+        let _ = app;
+        write_clipboard_windows(None, Some(html), Some(text))
+    }
+    #[cfg(not(windows))]
+    {
+        app.clipboard()
+            .write_html(html.to_string(), Some(text.to_string()))?;
+        Ok(())
+    }
 }
 
 /// Caption for a capture from the configured template.

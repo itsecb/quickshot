@@ -67,6 +67,9 @@ export const copyCapture = (id: number, rect?: Rect) => invoke<void>("copy_captu
 export const saveCapture = (id: number) => invoke<string>("save_capture", { id });
 export const ocrCapture = (id: number, rect?: Rect) => invoke<OcrOutput>("ocr_capture", { id, rect: rect ?? null });
 export const ocrPng = (png: Uint8Array) => invokeRaw<OcrOutput>("ocr_png", png);
+/** OCR a rendered PNG into a table and copy it as cells (HTML + TSV). */
+export const copyTable = (png: Uint8Array) =>
+  invokeRaw<{ rows: number; cols: number; csv: string }>("copy_table", png);
 export interface ThumbInit {
   id: number;
   width: number;

@@ -34,6 +34,10 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
   (see below).
 * **Delayed capture** (`Ctrl+Shift+5`, or tray: 3/5/10 s): time to open hover and right-click menus.
   The countdown never takes focus and is gone before the screen is captured.
+* **Editor power tools**: Spotlight (`S`, dims everything but a box), Magnify (`Z`, a zoomed
+  inset of a small area), Callout (`K`, a speech bubble pointing at something), and **Copy table**
+  (`Ctrl+Shift+T`): OCR a grid, console listing or report into rows and columns that paste into
+  Excel/Sheets/Outlook as real cells (Shift+click the button to save a CSV).
 * **Auto-redact** (`Ctrl+Shift+X` in the editor): finds IPs, MACs, emails, GUIDs, SIDs, internal
   hostnames, passwords/keys/tokens (plus your own domains or patterns) and pixelates them in one
   undoable step.

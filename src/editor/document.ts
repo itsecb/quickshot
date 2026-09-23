@@ -13,7 +13,10 @@ export type ToolId =
   | "blur"
   | "badge"
   | "crop"
-  | "measure";
+  | "measure"
+  | "spotlight"
+  | "magnify"
+  | "callout";
 
 export interface BaseShape {
   id: string;
@@ -101,6 +104,40 @@ export interface BadgeShape extends BaseShape {
   textColor: string;
 }
 
+/** Dims everything except this box (all spotlights share one dim layer). */
+export interface SpotlightShape extends BaseShape {
+  type: "spotlight";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  radius: number;
+  dim: number;
+}
+
+/** A zoomed copy of `src` shown at (x, y), scaled by `scale`, joined to its source. */
+export interface MagnifyShape extends BaseShape {
+  type: "magnify";
+  src: Rect;
+  x: number;
+  y: number;
+  scale: number;
+  radius: number;
+}
+
+/** Speech bubble at (x, y) whose tail points at (tipX, tipY). */
+export interface CalloutShape extends BaseShape {
+  type: "callout";
+  tipX: number;
+  tipY: number;
+  x: number;
+  y: number;
+  width: number;
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+}
+
 export type Shape =
   | RectShape
   | EllipseShape
@@ -110,7 +147,10 @@ export type Shape =
   | HighlighterShape
   | TextShape
   | BlurShape
-  | BadgeShape;
+  | BadgeShape
+  | SpotlightShape
+  | MagnifyShape
+  | CalloutShape;
 
 export interface Document {
   version: 1;
@@ -177,7 +217,12 @@ export function shapeBounds(s: Shape): Rect {
     case "rect":
     case "ellipse":
     case "blur":
+    case "spotlight":
       return { x: s.x, y: s.y, width: s.width, height: s.height };
+    case "magnify":
+      return { x: s.x, y: s.y, width: s.src.width * s.scale, height: s.src.height * s.scale };
+    case "callout":
+      return { x: s.x, y: s.y, width: s.width, height: s.fontSize * 1.4 * Math.max(1, s.text.split("\n").length) + 20 };
     case "line":
     case "arrow":
       return {
@@ -214,7 +259,12 @@ export function moveShape(s: Shape, dx: number, dy: number): Shape {
     case "blur":
     case "text":
     case "badge":
+    case "spotlight":
       return { ...s, x: s.x + dx, y: s.y + dy };
+    case "magnify":
+      return { ...s, x: s.x + dx, y: s.y + dy, src: { ...s.src, x: s.src.x + dx, y: s.src.y + dy } };
+    case "callout":
+      return { ...s, x: s.x + dx, y: s.y + dy, tipX: s.tipX + dx, tipY: s.tipY + dy };
     case "line":
     case "arrow":
       return { ...s, x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy };

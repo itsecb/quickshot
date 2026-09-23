@@ -13,6 +13,7 @@ use crate::qr;
 use crate::redact::{self, RedactMatch};
 use crate::settings::{self, Settings};
 use crate::state::{AppState, CaptureSource};
+use crate::table;
 use crate::{protocol, windows};
 
 #[derive(Serialize)]
@@ -367,4 +368,37 @@ pub fn thumb_drag_path(app: AppHandle, id: u64) -> AppResult<String> {
     );
     let png = crate::image_util::encode_png(&capture.image)?;
     Ok(output::temp_png(&app, &png, &stem)?.display().to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableCopy {
+    pub rows: usize,
+    pub cols: usize,
+    /// For "Save as CSV…".
+    pub csv: String,
+}
+
+/// Body: PNG (the editor's raw render). OCR it, rebuild the table, and put it on the clipboard
+/// as an HTML table + TSV text so it pastes into Excel/Sheets/Outlook as cells.
+#[tauri::command]
+pub async fn copy_table(app: AppHandle, request: Request<'_>) -> AppResult<TableCopy> {
+    let bytes = raw_body(&request)?;
+    let language = app.state::<AppState>().settings().ocr_language;
+    let rows = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<Vec<String>>> {
+        let img = decode_png(&bytes)?;
+        let out = ocr::recognize(&img, language.as_deref())?;
+        Ok(table::rows_from_ocr(&out.lines))
+    })
+    .await
+    .map_err(|e| AppError::Ocr(e.to_string()))??;
+    let cols = rows.first().map(Vec::len).unwrap_or(0);
+    if !rows.is_empty() && cols > 0 {
+        output::copy_html_text(&app, &table::to_html(&rows), &table::to_tsv(&rows))?;
+    }
+    Ok(TableCopy {
+        rows: rows.len(),
+        cols,
+        csv: table::to_csv(&rows),
+    })
 }

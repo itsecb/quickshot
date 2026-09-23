@@ -6,6 +6,8 @@
   import {
     copyImage,
     copyImageRich,
+    copyTable,
+    fsWriteText,
     copyText,
     currentLabel,
     editorInit,
@@ -37,8 +39,11 @@
     { id: "pen", label: "Pen" },
     { id: "highlighter", label: "Highlighter" },
     { id: "text", label: "Text" },
+    { id: "callout", label: "Callout" },
     { id: "badge", label: "Numbered step" },
     { id: "blur", label: "Blur / pixelate" },
+    { id: "spotlight", label: "Spotlight" },
+    { id: "magnify", label: "Magnify" },
     { id: "crop", label: "Crop" },
     { id: "measure", label: "Measure" },
   ];
@@ -56,6 +61,8 @@
     shadow: true,
     blurAmount: 12,
     blurMode: "pixelate",
+    dim: 0.55,
+    zoom: 2,
     badgeSize: 28,
     fill: false,
   });
@@ -69,6 +76,8 @@
   let dirty = $state(false);
   let hasCrop = $state(false);
   let selectedId = $state<string | null>(null);
+  /** type of the selected shape, for showing its properties */
+  let selectedType = $state<string | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
   let beautifyOpts = $state<Beautify>({ enabled: false, padding: 48, background: "ocean", radius: 10, shadow: true });
@@ -149,6 +158,8 @@
         shadow: s.shadow,
         blurAmount: s.blurAmount,
         blurMode: "pixelate",
+    dim: 0.55,
+    zoom: 2,
         badgeSize: s.badgeSize,
         fill: false,
       };
@@ -169,6 +180,7 @@
         onPreview: () => {},
         onSelect: (id) => {
           selectedId = id;
+          selectedType = id ? (stage?.selectedShape()?.type ?? null) : null;
           if (id) showSelectedWidth();
         },
         onStatus: (t) => (status = t),
@@ -327,6 +339,22 @@
       showToast(`Redacted ${hits.length} (${summary}). Review them; Ctrl+Z undoes`);
     });
 
+  /** OCR the image into rows/columns; copy as cells, or (`save`) write a CSV file. */
+  const doCopyTable = (save = false) =>
+    guarded("Copy table", async () => {
+      showToast("Reading table…");
+      const t = await copyTable(await renderPng(true));
+      if (!t.rows || !t.cols) return showToast("No table found", true);
+      if (save) {
+        const path = await saveDialog({ defaultPath: `${stem()}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+        if (!path) return;
+        await fsWriteText(path, t.csv);
+        showToast(`Saved ${t.rows} × ${t.cols} table to ${path}`);
+      } else {
+        showToast(`Copied table: ${t.rows} rows × ${t.cols} columns. Paste into Excel as cells`);
+      }
+    });
+
   const doScan = () =>
     guarded("Scan", async () => {
       if (!init) return;
@@ -466,6 +494,12 @@
           if (e.shiftKey) {
             e.preventDefault();
             void doRedact();
+          }
+          return;
+        case "t":
+          if (e.shiftKey) {
+            e.preventDefault();
+            void doCopyTable(e.altKey);
           }
           return;
         case "s":
@@ -631,6 +665,12 @@
         </div>
         <button class="tool" onclick={doOcr} title="Copy text from the image (OCR)">{@html icon("ocr")}</button>
         <button class="tool" onclick={doScan} title="Read QR codes / barcodes">{@html icon("qr")}</button>
+        <button
+          class="tool"
+          onclick={(e) => doCopyTable(e.shiftKey)}
+          title="Copy table: rows and columns that paste into Excel as cells (Ctrl+Shift+T) · Shift+click: save as CSV"
+          >{@html icon("table")}</button
+        >
       </div>
 
       <div class="group" aria-label="Share">
@@ -680,10 +720,27 @@
           <span style="width:2ch">{style.strokeWidth}</span>
         </label>
         {/if}
-        {#if tool === "text" || selectedId}
+        {#if tool === "text" || tool === "callout" || selectedId}
           <label class="width" title="Font size">
             <span class="muted">Text</span>
             <input type="range" min="10" max="96" bind:value={style.fontSize} onchange={applyStyle} />
+          </label>
+        {/if}
+        {#if tool === "spotlight" || selectedType === "spotlight"}
+          <label class="width" title="How dark everything outside the spotlight gets">
+            <span class="muted">Dim</span>
+            <input type="range" min="0.2" max="0.85" step="0.05" bind:value={style.dim} oninput={applyStyle} />
+          </label>
+        {/if}
+        {#if tool === "magnify" || selectedType === "magnify"}
+          <label class="width" title="Magnification">
+            <span class="muted">Zoom</span>
+            <select class="select-sm" bind:value={style.zoom} onchange={applyStyle}>
+              <option value={1.5}>1.5×</option>
+              <option value={2}>2×</option>
+              <option value={3}>3×</option>
+              <option value={4}>4×</option>
+            </select>
           </label>
         {/if}
         {#if tool === "blur"}

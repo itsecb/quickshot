@@ -24,6 +24,10 @@ export const icons: Record<string, string> = {
   clear: '<path d="M6 6l12 12M18 6L6 18"/>',
   redact: '<rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M6 12h.01M9 12h.01M12 12h.01M15 12h.01M18 12h.01"/>',
   beautify: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M3 3h18v18H3z" opacity=".5"/>',
+  spotlight: '<rect x="3" y="4" width="18" height="16" rx="2" opacity=".45"/><rect x="8" y="8" width="8" height="8" rx="2"/>',
+  magnify: '<rect x="3" y="12" width="6" height="6" rx="1"/><rect x="12" y="3" width="9" height="9" rx="1.5"/><path d="M9 12l3-3" stroke-dasharray="2 2"/>',
+  callout: '<path d="M4 5h16v10H10l-4 4v-4H4z"/><path d="M8 9h8M8 12h5"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M3 14h18M9 4v16M15 4v16"/>',
   qr: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2"/>',
   ticket: '<path d="M4 7h16v4a2 2 0 000 2v4H4v-4a2 2 0 000-4z"/><path d="M9 10h6M9 14h4"/>',
 };

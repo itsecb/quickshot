@@ -61,6 +61,9 @@
     badge: "Numbered step",
     crop: "Crop",
     measure: "Measure",
+    spotlight: "Spotlight",
+    magnify: "Magnify",
+    callout: "Callout",
   };
 
   const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode | "history" | "delayed" }[] = [

@@ -13,6 +13,8 @@ import {
   withShapes,
   type ArrowShape,
   type BlurShape,
+  type CalloutShape,
+  type MagnifyShape,
   type Document,
   type LineShape,
   type Shape,
@@ -30,6 +32,10 @@ export interface Style {
   blurMode: "pixelate" | "blur";
   badgeSize: number;
   fill: boolean;
+  /** spotlight: how dark everything outside the box gets (0-1) */
+  dim: number;
+  /** magnify: inset scale */
+  zoom: number;
 }
 
 export interface StageEvents {
@@ -45,8 +51,76 @@ interface Point {
   y: number;
 }
 
-type BoxShape = Extract<Shape, { type: "rect" | "ellipse" | "blur" }>;
-const isBox = (s: Shape): s is BoxShape => s.type === "rect" || s.type === "ellipse" || s.type === "blur";
+type BoxShape = Extract<Shape, { type: "rect" | "ellipse" | "blur" | "spotlight" }>;
+const isBox = (s: Shape): s is BoxShape =>
+  s.type === "rect" || s.type === "ellipse" || s.type === "blur" || s.type === "spotlight";
+
+/** Dark or light text, whichever reads better on `hex`. */
+function textColorFor(hex: string): string {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
+  if (!m) return "#ffffff";
+  const [r, g, b] = [m[1], m[2], m[3]].map((v) => parseInt(v!, 16) / 255);
+  return 0.299 * r! + 0.587 * g! + 0.114 * b! > 0.62 ? "#1d1f23" : "#ffffff";
+}
+
+const CALLOUT_PAD = 10;
+
+/**
+ * One dim layer for every spotlight, cut out with even-odd holes. It reads the spotlight
+ * nodes' live geometry, so holes follow while a spotlight is dragged or resized.
+ */
+function spotlightDim(layer: Konva.Layer, width: number, height: number, dim: number): Konva.Shape {
+  return new Konva.Shape({
+    name: "spot-dim",
+    listening: false,
+    sceneFunc: (ctx) => {
+      const c = (ctx as unknown as { _context: CanvasRenderingContext2D })._context;
+      c.save();
+      c.beginPath();
+      c.rect(0, 0, width, height);
+      for (const n of layer.find(".spot")) {
+        const w = n.width() * n.scaleX();
+        const h = n.height() * n.scaleY();
+        const r = Math.min((n as Konva.Rect).cornerRadius() as number, w / 2, h / 2);
+        c.roundRect(n.x(), n.y(), w, h, r);
+      }
+      c.fillStyle = `rgba(0,0,0,${dim})`;
+      c.fill("evenodd");
+      c.restore();
+    },
+  });
+}
+
+/** Source outline and connector for a magnify inset; follows the inset while it's dragged. */
+function magnifyGuide(layer: Konva.Layer, s: MagnifyShape): Konva.Shape {
+  return new Konva.Shape({
+    name: "magnify-guide",
+    listening: false,
+    sceneFunc: (ctx) => {
+      const c = (ctx as unknown as { _context: CanvasRenderingContext2D })._context;
+      const inset = layer.findOne(`#${s.id}`);
+      const ix = inset ? inset.x() : s.x;
+      const iy = inset ? inset.y() : s.y;
+      const iw = s.src.width * s.scale * (inset ? inset.scaleX() : 1);
+      const ih = s.src.height * s.scale * (inset ? inset.scaleY() : 1);
+      c.save();
+      c.strokeStyle = s.stroke;
+      c.lineWidth = 2;
+      c.setLineDash([6, 4]);
+      c.strokeRect(s.src.x, s.src.y, s.src.width, s.src.height);
+      // connector between the nearest points of the two boxes' centres
+      const sx = s.src.x + s.src.width / 2;
+      const sy = s.src.y + s.src.height / 2;
+      const tx = ix + iw / 2;
+      const ty = iy + ih / 2;
+      c.beginPath();
+      c.moveTo(Math.min(Math.max(tx, s.src.x), s.src.x + s.src.width), Math.min(Math.max(ty, s.src.y), s.src.y + s.src.height));
+      c.lineTo(Math.min(Math.max(sx, ix), ix + iw), Math.min(Math.max(sy, iy), iy + ih));
+      c.stroke();
+      c.restore();
+    },
+  });
+}
 
 const SHADOW = { shadowColor: "rgba(0,0,0,0.55)", shadowBlur: 6, shadowOffset: { x: 2, y: 2 }, shadowOpacity: 1 };
 
@@ -59,7 +133,11 @@ export function buildShapeNodes(layer: Konva.Layer, doc: Document, image: HTMLCa
   layer.destroyChildren();
   // The screenshot lives in the same layer so blend modes (highlighter multiply) see it.
   layer.add(new Konva.Image({ image, x: 0, y: 0, listening: false, name: "bg" }));
+  // spotlights dim everything under the annotations, so they sit right above the screenshot
+  const spots = doc.shapes.filter((s) => s.type === "spotlight");
+  if (spots.length) layer.add(spotlightDim(layer, image.width, image.height, Math.max(...spots.map((s) => s.dim))));
   for (const s of doc.shapes) {
+    if (s.type === "magnify") layer.add(magnifyGuide(layer, s));
     const node = buildNode(s, image);
     if (node) layer.add(node as Konva.Group);
   }
@@ -191,6 +269,81 @@ export function buildNode(s: Shape, image: HTMLCanvasElement): Konva.Node | null
       }
       node.cache({ pixelRatio: 1 });
       return node;
+    }
+    case "spotlight":
+      // invisible but hittable: the visible effect is the shared dim layer
+      return new Konva.Rect({
+        ...common,
+        name: "shape spot",
+        x: s.x,
+        y: s.y,
+        width: s.width,
+        height: s.height,
+        cornerRadius: s.radius,
+        fill: "rgba(0,0,0,0)",
+      });
+    case "magnify": {
+      const src = rectIntersect(s.src, { x: 0, y: 0, width: image.width, height: image.height }) ?? s.src;
+      const w = src.width * s.scale;
+      const h = src.height * s.scale;
+      const g = new Konva.Group({ ...common, x: s.x, y: s.y });
+      g.add(new Konva.Rect({ width: w, height: h, fill: "#ffffff", cornerRadius: s.radius, ...shadowProps(s.shadow) }));
+      g.add(new Konva.Image({ image, crop: src, width: w, height: h, cornerRadius: s.radius }));
+      g.add(new Konva.Rect({ width: w, height: h, stroke: s.stroke, strokeWidth: 3, cornerRadius: s.radius, strokeScaleEnabled: false }));
+      return g;
+    }
+    case "callout": {
+      const g = new Konva.Group({ ...common, x: s.x, y: s.y });
+      const text = new Konva.Text({
+        text: s.text || " ",
+        x: CALLOUT_PAD,
+        y: CALLOUT_PAD,
+        width: Math.max(20, s.width - CALLOUT_PAD * 2),
+        fontSize: s.fontSize,
+        fontFamily: s.fontFamily,
+        fontStyle: "bold",
+        lineHeight: 1.25,
+        fill: textColorFor(s.stroke),
+      });
+      const bubble = new Konva.Shape({
+        fill: s.stroke,
+        ...shadowProps(s.shadow),
+        sceneFunc: (ctx, shape) => {
+          const w = s.width * g.scaleX();
+          const h = text.height() + CALLOUT_PAD * 2;
+          const r = Math.min(10, h / 2);
+          // tail tip in group coordinates (the group moves; the tip stays where it points)
+          const tx = s.tipX - g.x();
+          const ty = s.tipY - g.y();
+          ctx.beginPath();
+          ctx.roundRect(0, 0, w, h, r);
+          const inside = tx >= 0 && tx <= w && ty >= 0 && ty <= h;
+          if (!inside) {
+            const half = Math.min(14, w / 4, h / 4);
+            const cx = Math.min(Math.max(tx, r + half), w - r - half);
+            const cy = Math.min(Math.max(ty, r + half), h - r - half);
+            // leave from the side facing the tip
+            const dx = tx < 0 ? -tx : tx > w ? tx - w : 0;
+            const dy = ty < 0 ? -ty : ty > h ? ty - h : 0;
+            if (dy >= dx) {
+              const ey = ty < 0 ? 0 : h;
+              ctx.moveTo(cx - half, ey);
+              ctx.lineTo(tx, ty);
+              ctx.lineTo(cx + half, ey);
+            } else {
+              const ex = tx < 0 ? 0 : w;
+              ctx.moveTo(ex, cy - half);
+              ctx.lineTo(tx, ty);
+              ctx.lineTo(ex, cy + half);
+            }
+            ctx.closePath();
+          }
+          ctx.fillStrokeShape(shape);
+        },
+      });
+      g.add(bubble);
+      g.add(text);
+      return g;
     }
     case "badge": {
       const g = new Konva.Group({ ...common, x: s.x, y: s.y });
@@ -348,7 +501,9 @@ export class EditorStage {
       patch.strokeWidth = s.type === "highlighter" ? Math.max(14, style.strokeWidth * 4) : style.strokeWidth;
     }
     if (style.shadow !== prev.shadow && s.type !== "blur" && s.type !== "highlighter") patch.shadow = style.shadow;
-    if (style.fontSize !== prev.fontSize && s.type === "text") patch.fontSize = style.fontSize;
+    if (style.fontSize !== prev.fontSize && (s.type === "text" || s.type === "callout")) patch.fontSize = style.fontSize;
+    if (style.dim !== prev.dim && s.type === "spotlight") patch.dim = style.dim;
+    if (style.zoom !== prev.zoom && s.type === "magnify") patch.scale = style.zoom;
     if (style.fill !== prev.fill && (s.type === "rect" || s.type === "ellipse")) patch.fill = style.fill ? style.stroke + "33" : null;
     if (s.type === "blur" && (style.blurAmount !== prev.blurAmount || style.blurMode !== prev.blurMode)) {
       patch.amount = style.blurAmount;
@@ -382,17 +537,17 @@ export class EditorStage {
       this.transformer.nodes([]);
       this.addEndpointAnchors(shape);
     } else {
-      const resizable = shape.type === "rect" || shape.type === "ellipse" || shape.type === "blur";
+      const resizable = shape.type === "rect" || shape.type === "ellipse" || shape.type === "blur" || shape.type === "spotlight";
       this.transformer.enabledAnchors(
         resizable
           ? ["top-left", "top-right", "bottom-left", "bottom-right", "middle-left", "middle-right", "top-center", "bottom-center"]
-          : shape.type === "text"
+          : shape.type === "text" || shape.type === "callout"
             ? ["middle-left", "middle-right"]
-            : shape.type === "badge"
+            : shape.type === "badge" || shape.type === "magnify"
               ? ["top-left", "top-right", "bottom-left", "bottom-right"]
               : [],
       );
-      this.transformer.keepRatio(shape.type === "badge");
+      this.transformer.keepRatio(shape.type === "badge" || shape.type === "magnify");
       this.transformer.rotateEnabled(shape.type === "text");
       this.transformer.nodes([node]);
       this.transformer.moveToTop();
@@ -450,7 +605,14 @@ export class EditorStage {
       switch (shape.type) {
         case "rect":
         case "blur":
+        case "spotlight":
           patch = { x: node.x(), y: node.y(), width: Math.max(2, node.width() * sx), height: Math.max(2, node.height() * sy) };
+          break;
+        case "magnify":
+          patch = { x: node.x(), y: node.y(), scale: Math.min(8, Math.max(1, shape.scale * sx)) } as Partial<MagnifyShape>;
+          break;
+        case "callout":
+          patch = { x: node.x(), y: node.y(), width: Math.max(80, shape.width * sx) } as Partial<CalloutShape>;
           break;
         case "ellipse": {
           const e = node as Konva.Ellipse;
@@ -485,6 +647,10 @@ export class EditorStage {
       case "blur":
       case "text":
       case "badge":
+      case "spotlight":
+      case "magnify":
+      case "callout":
+        // callout: only the bubble moves; the tail keeps pointing at its target
         patch = { x: node.x(), y: node.y() };
         break;
       case "line":
@@ -546,7 +712,7 @@ export class EditorStage {
       if (this.tool !== "select") return;
       const node = e.target.findAncestor(".shape", true) ?? (e.target.hasName("shape") ? e.target : null);
       const shape = node ? this.doc.shapes.find((s) => s.id === node.id()) : null;
-      if (shape?.type === "text") this.editText(shape);
+      if (shape?.type === "text" || shape?.type === "callout") this.editText(shape);
     });
     st.on("dragend", (e) => {
       const node = e.target.findAncestor(".shape", true) ?? (e.target.hasName("shape") ? e.target : null);
@@ -647,6 +813,40 @@ export class EditorStage {
         return { ...base, type: "arrow", x1: start.x, y1: start.y, x2: end.x, y2: end.y, headSize: Math.max(10, st.strokeWidth * 3.5) };
       case "blur":
         return { ...base, type: "blur", ...rectRound(r), mode: st.blurMode, amount: st.blurAmount, shadow: false };
+      case "spotlight":
+        return { ...base, type: "spotlight", ...rectRound(r), radius: 8, dim: st.dim, shadow: false };
+      case "magnify": {
+        // inset beside the source: right if it fits, else left, kept inside the image
+        const src = rectRound(this.clampRect(r));
+        const w = src.width * st.zoom;
+        const h = src.height * st.zoom;
+        const W = this.doc.imageWidth;
+        const H = this.doc.imageHeight;
+        let x = src.x + src.width + 24;
+        if (x + w > W) x = src.x - 24 - w;
+        x = Math.max(0, Math.min(x, W - w));
+        const y = Math.max(0, Math.min(src.y + src.height / 2 - h / 2, H - h));
+        return { ...base, type: "magnify", src, x, y, scale: st.zoom, radius: 8, strokeWidth: 3 };
+      }
+      case "callout": {
+        // drag from the thing you're pointing at to where the bubble goes
+        const width = Math.max(160, st.fontSize * 8);
+        const far = Math.hypot(p.x - start.x, p.y - start.y) >= 12;
+        const bx = far ? p.x - width / 2 : start.x + 30;
+        const by = far ? p.y - st.fontSize : start.y - st.fontSize * 3.5;
+        return {
+          ...base,
+          type: "callout",
+          tipX: start.x,
+          tipY: start.y,
+          x: Math.max(0, bx),
+          y: Math.max(0, by),
+          width,
+          text: "",
+          fontSize: st.fontSize,
+          fontFamily: st.fontFamily,
+        };
+      }
       default:
         return null;
     }
@@ -712,7 +912,13 @@ export class EditorStage {
     }
     const shape = this.shapeForDrag(d.kind, d.start, p, evt);
     this.cancelDraft();
+    if (shape?.type === "callout") {
+      // a click places a bubble too; either way, type its text next
+      this.editText(shape, true);
+      return;
+    }
     if (!shape || !moved) return;
+    if (shape.type === "magnify" && (shape.src.width < 4 || shape.src.height < 4)) return;
     if (isBox(shape) && (shape.width < 2 || shape.height < 2)) return;
     this.commit(addShape(this.doc, shape));
   }
@@ -785,7 +991,7 @@ export class EditorStage {
   }
 
   // ---------- text editing ----------
-  editText(shape: TextShape, isNew = false) {
+  editText(shape: TextShape | CalloutShape, isNew = false) {
     this.closeTextarea(false);
     const node = isNew ? null : this.shapeLayer.findOne<Konva.Label>(`#${shape.id}`);
     if (node) node.visible(false);
@@ -794,28 +1000,32 @@ export class EditorStage {
     const ta = document.createElement("textarea");
     this.textarea = ta;
     const abs = { x: this.stage.x() + shape.x * this.zoom, y: this.stage.y() + shape.y * this.zoom };
+    const callout = shape.type === "callout";
     Object.assign(ta.style, {
       position: "absolute",
       left: `${abs.x}px`,
       top: `${abs.y}px`,
       minWidth: "60px",
       width: shape.width ? `${shape.width * this.zoom}px` : "auto",
-      padding: `${6 * this.zoom}px`,
+      padding: `${(callout ? CALLOUT_PAD : 6) * this.zoom}px`,
       margin: "0",
       border: "1px dashed #4c8dff",
-      borderRadius: "4px",
-      background: shape.background ?? "rgba(0,0,0,0.25)",
-      color: shape.stroke,
+      borderRadius: callout ? `${10 * this.zoom}px` : "4px",
+      background: callout ? shape.stroke : (shape.background ?? "rgba(0,0,0,0.25)"),
+      color: callout ? textColorFor(shape.stroke) : shape.stroke,
       font: `bold ${shape.fontSize * this.zoom}px ${shape.fontFamily}`,
       lineHeight: "1.25",
       outline: "none",
       resize: "none",
       overflow: "hidden",
-      whiteSpace: "pre",
+      // callouts wrap inside their bubble; text boxes grow with their content
+      whiteSpace: callout ? "pre-wrap" : "pre",
+      boxSizing: "border-box",
       transformOrigin: "left top",
-      transform: `rotate(${shape.rotation}deg)`,
+      transform: callout ? "none" : `rotate(${shape.rotation}deg)`,
       zIndex: "10",
     } as CSSStyleDeclaration);
+    if (callout) ta.placeholder = "Type your note…";
     ta.value = shape.text;
     ta.rows = 1;
     const autosize = () => {
@@ -848,7 +1058,7 @@ export class EditorStage {
     });
   }
 
-  private closeTextarea(commit: boolean, shape?: TextShape, isNew = false) {
+  private closeTextarea(commit: boolean, shape?: TextShape | CalloutShape, isNew = false) {
     const ta = this.textarea;
     if (!ta) return;
     this.textarea = null;

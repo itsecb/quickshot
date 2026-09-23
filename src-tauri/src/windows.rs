@@ -227,7 +227,7 @@ pub fn open_editor(app: &AppHandle, capture: &Capture) -> AppResult<()> {
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor.html".into()))
         .title(title)
         .inner_size(want_w, want_h)
-        .min_inner_size(880.0, 480.0) // below this the toolbar can't fit even icon-only
+        .min_inner_size(960.0, 480.0) // below this the toolbar can't fit even icon-only
         .visible(false)
         .build()?;
     if let Some(w) = work {
