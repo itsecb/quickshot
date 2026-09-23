@@ -5,7 +5,8 @@ body,
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #000;
+  /* see-through until the frozen frame is drawn (the live screen shows) */
+  background: transparent;
   cursor: none;
 }
 

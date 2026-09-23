@@ -28,6 +28,8 @@ static BUILT: Mutex<Option<HashMap<String, Rect>>> = Mutex::new(None);
 
 pub const START_EVENT: &str = "overlay://start";
 pub const RESET_EVENT: &str = "overlay://reset";
+/// The window list for hover/click detection, sent once it's built.
+pub const WINDOWS_EVENT: &str = "overlay://windows";
 
 fn with<T>(
     map: &Mutex<Option<HashMap<String, Rect>>>,
@@ -96,7 +98,10 @@ fn build(app: &AppHandle, m: &MonitorInfo, warm: bool) -> AppResult<()> {
         .focused(false)
         .shadow(false)
         .visible_on_all_workspaces(true)
-        .background_color(tauri::window::Color(0, 0, 0, 255))
+        // see-through: the page shows a dim layer over the live screen at once and draws the
+        // frozen frame when it has loaded
+        .transparent(true)
+        .background_color(tauri::window::Color(0, 0, 0, 0))
         .position(m.x as f64 / scale, m.y as f64 / scale)
         .inner_size(m.width as f64 / scale, m.height as f64 / scale)
         .build()?;

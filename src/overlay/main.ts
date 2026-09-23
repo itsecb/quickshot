@@ -3,7 +3,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cancelCapture, copyText, elementChain, finishCapture, overlayIdle, overlayInit, overlayReady } from "$lib/ipc";
-import { fetchRawToCanvas } from "$lib/image";
 import { rectContains, rectEdges, rectEquals, rectFromPoints, rectIntersect, rectRound, snapPoint, type Edge } from "$lib/geometry";
 import { rgbToHex } from "$lib/image";
 import type { OverlayInit, Rect, WindowInfo } from "$lib/types";
@@ -25,6 +24,8 @@ const FADE_MS = REDUCED_MOTION ? 1 : 150;
 const GLIDE_MS = REDUCED_MOTION ? 1 : 120;
 const FLASH_MS = 140;
 const SNAP_PX = 8;
+/** Lowest alpha drawn before the frozen frame arrives: invisible, but still hit-testable. */
+const LIVE_MIN_ALPHA = 0.01;
 /** Pause this long over a window before asking for its parts (UI Automation is cross-process). */
 const ELEMENT_DELAY_MS = 60;
 /** Smallest part picked automatically (px at 100% scale); smaller ones are a wheel-scroll away. */
@@ -129,18 +130,25 @@ class Overlay {
   private querySeq = 0;
   private queryTimer = 0;
 
+  /** The frozen frame has arrived; until then the overlay is a see-through dim layer over the
+   * live screen (which still looks exactly like the frame, captured an instant earlier). */
+  private frameReady = false;
+
   constructor() {
-    this.ctx = this.canvas.getContext("2d", { alpha: false })!;
+    // transparent: the live screen shows through until the frozen frame is drawn
+    this.ctx = this.canvas.getContext("2d")!;
     document.getElementById("app")!.appendChild(this.canvas);
   }
 
   async start() {
     this.chrome = chromeColors(); // stylesheets are applied by now
+    // the window list comes separately, once built, so it never holds up the overlay
+    void listen<WindowInfo[]>("overlay://windows", (e) => this.setWindows(e.payload)).then((u) =>
+      this.disposed ? u() : this.unlisten.push(u),
+    );
     this.init = await overlayInit(label);
-    this.frame = await fetchRawToCanvas(this.init.monitor.frameUrl);
     if (this.disposed) return;
-    this.frameCtx = this.frame.getContext("2d", { willReadFrequently: true })!;
-    const { width, height } = this.frame;
+    const { width, height } = this.init.monitor;
     this.canvas.width = width;
     this.canvas.height = height;
     // One canvas pixel per screen pixel, or the frozen screen looks soft. At fractional
@@ -152,28 +160,72 @@ class Overlay {
       this.canvas.style.width = `${cssW}px`;
       this.canvas.style.height = `${cssH}px`;
     }
+    this.setWindows(this.init.windows);
+    this.hint = this.hintText();
+    this.bind();
+    const frame = this.loadFrame();
+    // picking a colour needs the pixels from the start; everything else can begin at once
+    if (this.init.mode === "color") await frame;
+    if (this.disposed) return;
+    this.render(); // barely-there first frame: identical to the live screen when shown
+    await overlayReady(label);
+    this.fadeStart = performance.now();
+    this.schedule();
+    await frame;
+  }
+
+  /** Fetch the frozen frame (BMP, decoded off the main thread) and switch over to it. */
+  private async loadFrame() {
+    const res = await fetch(this.init.monitor.frameUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`frame fetch failed: ${res.status} ${await res.text()}`);
+    const bitmap = await createImageBitmap(await res.blob());
+    if (this.disposed) {
+      bitmap.close();
+      return;
+    }
+    const { width, height } = this.canvas;
     this.clean = document.createElement("canvas");
     this.clean.width = width;
     this.clean.height = height;
-    this.clean.getContext("2d")!.drawImage(this.frame, 0, 0);
+    this.clean.getContext("2d")!.drawImage(bitmap, 0, 0, width, height);
     this.dimmed = document.createElement("canvas");
     this.dimmed.width = width;
     this.dimmed.height = height;
     const dctx = this.dimmed.getContext("2d")!;
-    dctx.drawImage(this.frame, 0, 0);
-    dctx.fillStyle = `rgba(0,0,0,${this.init.mode === "color" ? DIM_COLOR_MODE : DIM})`;
+    dctx.drawImage(bitmap, 0, 0, width, height);
+    dctx.fillStyle = `rgba(0,0,0,${this.dimAlpha()})`;
     dctx.fillRect(0, 0, width, height);
-    for (const r of [...this.init.windows.map((w) => w.rect), ...this.init.monitors]) {
+    bitmap.close();
+    this.frameReady = true;
+    this.schedule();
+  }
+
+  private dimAlpha(): number {
+    return this.init.mode === "color" ? DIM_COLOR_MODE : DIM;
+  }
+
+  private pendingWindows: WindowInfo[] | null = null;
+
+  /** Hover/click targets and snapping edges. */
+  private setWindows(windows: WindowInfo[]) {
+    if (!this.init) {
+      this.pendingWindows = windows; // arrived before our init: use it once init is here
+      return;
+    }
+    if (!windows.length && this.pendingWindows) windows = this.pendingWindows;
+    this.init.windows = windows;
+    this.vEdges = [];
+    this.hEdges = [];
+    for (const r of [...windows.map((w) => w.rect), ...this.init.monitors]) {
       const e = rectEdges(r);
       this.vEdges.push(...e.vertical);
       this.hEdges.push(...e.horizontal);
     }
-    this.hint = this.hintText();
-    this.render(); // undimmed first frame: identical to the live screen when shown
-    this.bind();
-    if (this.disposed) return;
-    await overlayReady(label);
-    this.fadeStart = performance.now();
+    if (this.cursor && !this.dragStart && this.init.mode !== "color") {
+      const global = this.toGlobal(this.cursor);
+      this.hoverWindow = this.windowAt(global);
+      this.queueElementQuery(global);
+    }
     this.schedule();
   }
 
@@ -494,6 +546,15 @@ class Overlay {
   }
 
   private pixelAt(p: Point): [number, number, number] {
+    if (!this.frameReady) return [0, 0, 0];
+    if (!this.frameCtx) {
+      // CPU-side copy for reading pixels, made the first time one is needed
+      this.frame = document.createElement("canvas");
+      this.frame.width = this.clean.width;
+      this.frame.height = this.clean.height;
+      this.frameCtx = this.frame.getContext("2d", { willReadFrequently: true })!;
+      this.frameCtx.drawImage(this.clean, 0, 0);
+    }
     const x = Math.max(0, Math.min(this.frame.width - 1, Math.floor(p.x)));
     const y = Math.max(0, Math.min(this.frame.height - 1, Math.floor(p.y)));
     const d = this.frameCtx.getImageData(x, y, 1, 1).data;
@@ -567,11 +628,19 @@ class Overlay {
 
     // dimmed screen, fading in once the overlay is visible
     const fade = this.fadeStart ? Math.min(1, (now - this.fadeStart) / FADE_MS) : 0;
-    if (fade < 1) ctx.drawImage(this.clean, 0, 0);
-    if (fade > 0) {
-      ctx.globalAlpha = easeOutCubic(fade);
-      ctx.drawImage(this.dimmed, 0, 0);
-      ctx.globalAlpha = 1;
+    if (this.frameReady) {
+      if (fade < 1) ctx.drawImage(this.clean, 0, 0);
+      if (fade > 0) {
+        ctx.globalAlpha = easeOutCubic(fade);
+        ctx.drawImage(this.dimmed, 0, 0);
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      // see-through dim over the live screen; never fully transparent, which would let
+      // clicks fall through to the app underneath (macOS hit-tests by alpha)
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = `rgba(0,0,0,${Math.max(LIVE_MIN_ALPHA, this.dimAlpha() * easeOutCubic(fade))})`;
+      ctx.fillRect(0, 0, W, H);
     }
 
     const gliding = this.updateShown(now);
@@ -580,7 +649,13 @@ class Overlay {
     const vis = shown ? rectIntersect(shown, { x: 0, y: 0, width: W, height: H }) : null;
     if (vis && active) {
       // undimmed window/selection, then the animated border
-      ctx.drawImage(this.clean, vis.x, vis.y, vis.width, vis.height, vis.x, vis.y, vis.width, vis.height);
+      if (this.frameReady) {
+        ctx.drawImage(this.clean, vis.x, vis.y, vis.width, vis.height, vis.x, vis.y, vis.width, vis.height);
+      } else {
+        ctx.clearRect(vis.x, vis.y, vis.width, vis.height);
+        ctx.fillStyle = `rgba(0,0,0,${LIVE_MIN_ALPHA})`;
+        ctx.fillRect(vis.x, vis.y, vis.width, vis.height);
+      }
       this.drawBorder(vis, now);
       if (this.selection || this.remoteSelection) this.drawCorners(vis);
       this.drawSnapGuides(vis);
@@ -616,7 +691,7 @@ class Overlay {
       // While dragging, the cursor sits on the frame's corner: full-screen crosshair lines
       // would run along (and hide) its right and bottom edges, so the frame alone guides.
       if (!this.dragStart) this.drawCrosshair(this.cursor);
-      if (this.init.showMagnifier || this.init.mode === "color") this.drawMagnifier(this.cursor);
+      if (this.frameReady && (this.init.showMagnifier || this.init.mode === "color")) this.drawMagnifier(this.cursor);
     }
 
     if (!this.finished) this.drawHint();

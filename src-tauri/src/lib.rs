@@ -117,7 +117,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_drag::init())
-        .register_uri_scheme_protocol(protocol::SCHEME, protocol::handle)
+        .register_asynchronous_uri_scheme_protocol(protocol::SCHEME, protocol::handle_async)
         .setup(|app| {
             let handle = app.handle().clone();
             let settings = settings::load(&handle);

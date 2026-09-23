@@ -1,3 +1,4 @@
+mod gdi;
 pub mod monitors;
 
 use std::collections::{HashMap, HashSet};
@@ -6,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use image::RgbaImage;
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub use monitors::MonitorInfo;
 
@@ -94,8 +95,22 @@ fn capture_monitors(wanted: impl Fn(&Rect) -> bool) -> AppResult<Vec<CaptureFram
     if monitors.is_empty() {
         return Err(AppError::Capture("no monitors found".into()));
     }
+    // fast path first (GDI on Windows, all monitors at once); xcap for anything it missed
+    let rects: Vec<Rect> = monitors
+        .iter()
+        .map(|m| match (m.x(), m.y(), m.width(), m.height()) {
+            (Ok(x), Ok(y), Ok(w), Ok(h)) if !monitors::COORDS_ARE_LOGICAL => Rect::new(x, y, w, h),
+            _ => Rect::default(),
+        })
+        .collect();
+    let wanted_rects: Vec<Rect> = rects
+        .iter()
+        .map(|r| if wanted(r) { *r } else { Rect::default() })
+        .collect();
+    let mut fast = gdi::grab_all(&wanted_rects).into_iter();
     let mut frames = Vec::with_capacity(monitors.len());
     for m in monitors {
+        let quick = fast.next().flatten();
         let id = m.id()?;
         let scale = m.scale_factor().map(|s| s as f64).unwrap_or(1.0);
         let (x, y, w, h) = (m.x()?, m.y()?, m.width()?, m.height()?);
@@ -113,12 +128,15 @@ fn capture_monitors(wanted: impl Fn(&Rect) -> bool) -> AppResult<Vec<CaptureFram
         if !wanted(&approx) {
             continue;
         }
-        let image = match m.capture_image() {
-            Ok(img) => img,
-            Err(e) => {
-                log::warn!("monitor {id} capture failed: {e}");
-                continue;
-            }
+        let image = match quick {
+            Some(img) if img.dimensions() == (w, h) || monitors::COORDS_ARE_LOGICAL => img,
+            _ => match m.capture_image() {
+                Ok(img) => img,
+                Err(e) => {
+                    log::warn!("monitor {id} capture failed: {e}");
+                    continue;
+                }
+            },
         };
         let raw = monitors::RawGeometry {
             x,
@@ -142,7 +160,7 @@ fn capture_monitors(wanted: impl Fn(&Rect) -> bool) -> AppResult<Vec<CaptureFram
                 height: rect.height,
                 scale: if raw.scale > 0.0 { raw.scale } else { 1.0 },
                 is_primary: m.is_primary().unwrap_or(false),
-                frame_url: format!("{}?n={nonce}", protocol::monitor_url(id)),
+                frame_url: format!("{}.bmp?n={nonce}", protocol::monitor_url(id)),
             },
             image,
         });
@@ -661,16 +679,20 @@ fn begin_overlay(
     windows: Option<std::thread::JoinHandle<Vec<WindowInfo>>>,
 ) -> AppResult<()> {
     let state = app.state::<AppState>();
-    let windows = match windows {
-        Some(job) => job.join().unwrap_or_default(),
-        None => list_windows(&screens_of(&frames), mode == CaptureMode::Window),
-    };
+    // don't wait for the window list: the overlays open without it and get it when it's done
+    let job = windows.unwrap_or_else(|| {
+        let screens = screens_of(&frames);
+        let verbose = mode == CaptureMode::Window;
+        std::thread::spawn(move || list_windows(&screens, verbose))
+    });
     let monitors: Vec<MonitorInfo> = frames.iter().map(|f| f.monitor.clone()).collect();
     let labels: Vec<String> = monitors.iter().map(|m| overlay::label_for(m.id)).collect();
+    // frame URLs carry a per-capture nonce: identifies this capture's session
+    let this_capture = monitors.first().map(|m| m.frame_url.clone());
     let session = CaptureSession {
         mode,
         frames,
-        windows,
+        windows: Vec::new(),
         labels: labels.clone(),
         ready: HashSet::new(),
         shown: false,
@@ -688,6 +710,25 @@ fn begin_overlay(
             overlay::close_labels(&app2, &labels);
         }
     })?;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let windows = job.join().unwrap_or_default();
+        let state = app.state::<AppState>();
+        let labels = {
+            let mut guard = state.session.lock().unwrap();
+            let Some(session) = guard.as_mut() else {
+                return;
+            };
+            if session.frames.first().map(|f| &f.monitor.frame_url) != this_capture.as_ref() {
+                return; // that capture is over and another one started
+            }
+            session.windows = windows.clone();
+            session.labels.clone()
+        };
+        for label in labels {
+            let _ = app.emit_to(label.as_str(), overlay::WINDOWS_EVENT, &windows);
+        }
+    });
     Ok(())
 }
 

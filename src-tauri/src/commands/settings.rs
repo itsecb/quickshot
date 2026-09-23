@@ -44,6 +44,10 @@ pub fn set_settings(
 
 pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     let launcher = app.autolaunch();
+    // turning off something that was never on fails with "file not found": skip it
+    if !enabled && !launcher.is_enabled().unwrap_or(true) {
+        return;
+    }
     let result = if enabled {
         launcher.enable()
     } else {

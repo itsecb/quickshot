@@ -31,9 +31,13 @@ export function acceleratorFromEvent(e: KeyboardEvent): string | null {
   if (e.altKey) mods.push("Alt");
   if (e.shiftKey) mods.push("Shift");
   if (e.metaKey) mods.push("Super");
+  // Letters and digits by physical key: with Shift held, e.key is "$" for 4, which the
+  // shortcut parser doesn't know
+  const code = /^Key([A-Z])$|^Digit(\d)$/.exec(e.code);
   let name: string;
   if (NAMED[key]) name = NAMED[key]!;
   else if (/^F\d{1,2}$/.test(key)) name = key;
+  else if (code) name = code[1] ?? code[2]!;
   else if (key.length === 1) name = key.toUpperCase();
   else return null;
   // a bare letter/digit without modifiers would hijack typing everywhere

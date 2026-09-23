@@ -1,6 +1,6 @@
 {
   "name": "quickshot",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "Fast, lightweight screenshot capture, markup and guide builder",
   "private": true,
   "type": "module",

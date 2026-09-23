@@ -5,6 +5,20 @@ use crate::settings::Settings;
 use crate::state::CaptureMode;
 use crate::{capture, windows};
 
+/// Older settings could store the shifted symbol of a digit key ("Alt+Shift+$" for Alt+Shift+4),
+/// which the shortcut parser rejects: map those back to the digit (US layout).
+fn normalize(accel: &str) -> String {
+    let accel = accel.trim();
+    let Some((mods, key)) = accel.rsplit_once('+') else {
+        return accel.to_string();
+    };
+    const SHIFTED: &str = ")!@#$%^&*(";
+    match key.chars().next().and_then(|c| SHIFTED.find(c)) {
+        Some(digit) if key.chars().count() == 1 => format!("{mods}+{digit}"),
+        _ => accel.to_string(),
+    }
+}
+
 /// (Re)register every global hotkey from settings. Returns human-readable conflicts.
 pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
     let gs = app.global_shortcut();
@@ -32,7 +46,8 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
     ];
     let mut conflicts = Vec::new();
     for (accel, mode) in bindings {
-        let accel = accel.trim();
+        let accel = normalize(accel);
+        let accel = accel.as_str();
         if accel.is_empty() {
             continue;
         }
@@ -52,7 +67,8 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
             conflicts.push(format!("{accel}: {e}"));
         }
     }
-    let delayed = settings.hotkeys.delayed_region.trim();
+    let delayed = normalize(&settings.hotkeys.delayed_region);
+    let delayed = delayed.as_str();
     if !delayed.is_empty() {
         let secs = settings.capture_delay_secs.clamp(1, 60);
         let result = gs.on_shortcut(delayed, move |app, _shortcut, event| {
@@ -65,7 +81,8 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
             conflicts.push(format!("{delayed}: {e}"));
         }
     }
-    let record = settings.hotkeys.record_steps.trim();
+    let record = normalize(&settings.hotkeys.record_steps);
+    let record = record.as_str();
     if !record.is_empty() {
         let result = gs.on_shortcut(record, |app, _shortcut, event| {
             if event.state() == ShortcutState::Pressed {
@@ -77,7 +94,8 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
             conflicts.push(format!("{record}: {e}"));
         }
     }
-    let history = settings.hotkeys.history.trim();
+    let history = normalize(&settings.hotkeys.history);
+    let history = history.as_str();
     if !history.is_empty() {
         let result = gs.on_shortcut(history, |app, _shortcut, event| {
             if event.state() == ShortcutState::Pressed {

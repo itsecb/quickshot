@@ -2,6 +2,7 @@
 //!
 //! Paths:
 //!   /monitor/<id>        raw RGBA of the current session frame for that monitor
+//!   /monitor/<id>.bmp    the same as a BMP (the overlay decodes it natively, off its main thread)
 //!   /capture/<id>        raw RGBA of a finished capture
 //!   /capture/<id>.png    PNG of a finished capture (for <img> and pins)
 //!   /history/<id>.jpg    history thumbnail
@@ -9,7 +10,7 @@
 //! Raw responses carry `x-width` / `x-height` headers.
 
 use tauri::http::{Request, Response, StatusCode};
-use tauri::{Manager, Runtime, UriSchemeContext};
+use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
 use crate::history;
 use crate::image_util::encode_png;
@@ -81,6 +82,38 @@ fn png(body: Vec<u8>) -> Response<Vec<u8>> {
         .unwrap()
 }
 
+/// 32-bit top-down BMP: a 54-byte header in front of the pixels (BGRA order).
+fn bmp(image: &image::RgbaImage) -> Response<Vec<u8>> {
+    let (w, h) = image.dimensions();
+    let pixels = w as usize * h as usize * 4;
+    let mut body = Vec::with_capacity(54 + pixels);
+    let u32le = |v: u32| v.to_le_bytes();
+    // BITMAPFILEHEADER
+    body.extend_from_slice(b"BM");
+    body.extend_from_slice(&u32le((54 + pixels) as u32));
+    body.extend_from_slice(&[0; 4]);
+    body.extend_from_slice(&u32le(54));
+    // BITMAPINFOHEADER: negative height = rows top-down
+    body.extend_from_slice(&u32le(40));
+    body.extend_from_slice(&(w as i32).to_le_bytes());
+    body.extend_from_slice(&(-(h as i32)).to_le_bytes());
+    body.extend_from_slice(&1u16.to_le_bytes());
+    body.extend_from_slice(&32u16.to_le_bytes());
+    body.extend_from_slice(&u32le(0)); // BI_RGB
+    body.extend_from_slice(&u32le(pixels as u32));
+    body.extend_from_slice(&[0; 16]);
+    for px in image.as_raw().chunks_exact(4) {
+        body.extend_from_slice(&[px[2], px[1], px[0], 255]);
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Content-Type", "image/bmp")
+        .header("Cache-Control", "no-store")
+        .body(body)
+        .unwrap()
+}
+
 /// History files never change once written, so the webview may cache them.
 fn file(path: std::path::PathBuf, content_type: &str) -> Response<Vec<u8>> {
     match std::fs::read(path) {
@@ -95,11 +128,18 @@ fn file(path: std::path::PathBuf, content_type: &str) -> Response<Vec<u8>> {
     }
 }
 
-pub fn handle<R: Runtime>(
+/// Requests are answered on a worker thread: frames are tens of MB, and building them on the
+/// main thread (where synchronous handlers run) held up every window while overlays loaded.
+pub fn handle_async<R: Runtime>(
     ctx: UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,
-) -> Response<Vec<u8>> {
-    let app = ctx.app_handle();
+    responder: UriSchemeResponder,
+) {
+    let app = ctx.app_handle().clone();
+    std::thread::spawn(move || responder.respond(handle(&app, request)));
+}
+
+fn handle<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let state = app.state::<AppState>();
     let path = request.uri().path().trim_start_matches('/').to_string();
     let mut parts = path.splitn(2, '/');
@@ -108,16 +148,27 @@ pub fn handle<R: Runtime>(
 
     match kind {
         "monitor" => {
-            let Ok(id) = rest.parse::<u32>() else {
+            let (id_str, as_bmp) = match rest.strip_suffix(".bmp") {
+                Some(id) => (id, true),
+                None => (rest, false),
+            };
+            let Ok(id) = id_str.parse::<u32>() else {
                 return error(StatusCode::BAD_REQUEST, "bad monitor id");
             };
-            let guard = state.session.lock().unwrap();
-            let Some(session) = guard.as_ref() else {
-                return error(StatusCode::NOT_FOUND, "no capture session");
+            let image = {
+                let guard = state.session.lock().unwrap();
+                let Some(session) = guard.as_ref() else {
+                    return error(StatusCode::NOT_FOUND, "no capture session");
+                };
+                match session.frames.iter().find(|f| f.monitor.id == id) {
+                    Some(f) => f.image.clone(),
+                    None => return error(StatusCode::NOT_FOUND, "no frame for monitor"),
+                }
             };
-            match session.frames.iter().find(|f| f.monitor.id == id) {
-                Some(f) => raw(f.image.width(), f.image.height(), f.image.as_raw().clone()),
-                None => error(StatusCode::NOT_FOUND, "no frame for monitor"),
+            if as_bmp {
+                bmp(&image)
+            } else {
+                raw(image.width(), image.height(), image.into_raw())
             }
         }
         "capture" => {
