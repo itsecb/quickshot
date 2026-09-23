@@ -64,6 +64,7 @@
     dim: 0.55,
     zoom: 2,
     badgeSize: 28,
+    badgeKind: "circle",
     fill: false,
   });
   let palette = $state<string[]>([]);
@@ -122,9 +123,45 @@
     }
   }
 
+  // numbered steps: size and shape are remembered for the next ones
+  const BADGE_KEY = "quickshot.badge";
+  let selectedTail = $state(false);
+
+  function loadBadge() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BADGE_KEY) ?? "{}");
+      if (typeof saved.size === "number") style.badgeSize = saved.size;
+      if (["circle", "rounded", "square"].includes(saved.kind)) style.badgeKind = saved.kind;
+    } catch {
+      // keep the defaults
+    }
+  }
+
+  function setBadge(patch: Partial<Pick<Style, "badgeSize" | "badgeKind">>) {
+    Object.assign(style, patch);
+    applyStyle();
+    try {
+      localStorage.setItem(BADGE_KEY, JSON.stringify({ size: style.badgeSize, kind: style.badgeKind }));
+    } catch {
+      // storage unavailable: still applies for this session
+    }
+  }
+
+  function toggleTail(on: boolean) {
+    stage?.setBadgeTail(on);
+    selectedTail = on;
+  }
+
   /** Show the selected shape's own width in the toolbar without changing the shape. */
   function showSelectedWidth() {
     const shape = stage?.selectedShape();
+    if (shape?.type === "badge") {
+      style.badgeSize = shape.size;
+      style.badgeKind = shape.kind ?? "circle";
+      selectedTail = !!shape.tip;
+      stage?.syncStyle($state.snapshot(style));
+      return;
+    }
     if (!shape || !WIDTH_TOOLS.has(shape.type)) return;
     style.strokeWidth = shape.type === "highlighter" ? Math.max(1, Math.round(shape.strokeWidth / 4)) : shape.strokeWidth;
     stage?.syncStyle($state.snapshot(style));
@@ -161,8 +198,10 @@
     dim: 0.55,
     zoom: 2,
         badgeSize: s.badgeSize,
+        badgeKind: "circle",
         fill: false,
       };
+      loadBadge();
       palette = s.palette;
       shortcuts = s.shortcuts;
       defaultWidth = s.strokeWidth;
@@ -713,18 +752,36 @@
       </div>
 
       <div class="group">
-        {#if WIDTH_TOOLS.has(tool) || (tool === "select" && selectedId)}
+        {#if WIDTH_TOOLS.has(tool) || (tool === "select" && selectedId && selectedType !== "badge")}
         <label class="width" title="Stroke width, remembered per tool ( [ and ] )">
           <span class="muted">Width</span>
           <input type="range" min="1" max="30" value={style.strokeWidth} oninput={(e) => setWidth(+e.currentTarget.value)} />
           <span style="width:2ch">{style.strokeWidth}</span>
         </label>
         {/if}
-        {#if tool === "text" || tool === "callout" || selectedId}
+        {#if tool === "text" || tool === "callout" || (selectedId && selectedType !== "badge")}
           <label class="width" title="Font size">
             <span class="muted">Text</span>
             <input type="range" min="10" max="96" bind:value={style.fontSize} onchange={applyStyle} />
           </label>
+        {/if}
+        {#if tool === "badge" || selectedType === "badge"}
+          <label class="width" title="Size of numbered steps">
+            <span class="muted">Size</span>
+            <input type="range" min="16" max="120" value={style.badgeSize} oninput={(e) => setBadge({ badgeSize: +e.currentTarget.value })} />
+          </label>
+          <div class="seg" role="group" aria-label="Step shape">
+            {#each [["circle", "Circle", "●"], ["rounded", "Rounded square", "▢"], ["square", "Square", "■"]] as [kind, label, glyph] (kind)}
+              <button class:active={style.badgeKind === kind} title={label} onclick={() => setBadge({ badgeKind: kind as Style["badgeKind"] })}>{glyph}</button>
+            {/each}
+          </div>
+          {#if selectedType === "badge"}
+            <label class="width" title="A pointer from the number to what it's about (drag its end to aim)">
+              <input type="checkbox" checked={selectedTail} onchange={(e) => toggleTail(e.currentTarget.checked)} /> Tail
+            </label>
+          {:else}
+            <span class="muted hint-sm" title="Click to place a step, or drag from the thing it's about to where the number goes">drag for a tail</span>
+          {/if}
         {/if}
         {#if tool === "spotlight" || selectedType === "spotlight"}
           <label class="width" title="How dark everything outside the spotlight gets">

@@ -5,6 +5,7 @@ import { beautify } from "./beautify";
 import { rectFromPoints, rectIntersect, rectRound } from "$lib/geometry";
 import {
   addShape,
+  hitShape,
   moveShape,
   newId,
   nextBadgeNumber,
@@ -12,6 +13,8 @@ import {
   updateShape,
   withShapes,
   type ArrowShape,
+  type BadgeKind,
+  type BadgeShape,
   type BlurShape,
   type CalloutShape,
   type MagnifyShape,
@@ -31,6 +34,7 @@ export interface Style {
   blurAmount: number;
   blurMode: "pixelate" | "blur";
   badgeSize: number;
+  badgeKind: BadgeKind;
   fill: boolean;
   /** spotlight: how dark everything outside the box gets (0-1) */
   dim: number;
@@ -347,19 +351,41 @@ export function buildNode(s: Shape, image: HTMLCanvasElement): Konva.Node | null
     }
     case "badge": {
       const g = new Konva.Group({ ...common, x: s.x, y: s.y });
+      const border = Math.max(1.5, s.size / 14);
+      const tail = badgeTailPoints(s, s.tip);
+      if (tail) {
+        // drawn first: the badge covers the tail's base, leaving a wedge pointing at the tip
+        g.add(
+          new Konva.Line({
+            name: "badge-tail",
+            points: tail,
+            closed: true,
+            fill: s.stroke,
+            stroke: "#ffffff",
+            strokeWidth: border,
+            lineJoin: "round",
+            ...shadowProps(s.shadow),
+          }),
+        );
+      }
+      const kind = s.kind ?? "circle";
+      const body = { name: "badge-body", fill: s.stroke, stroke: "#ffffff", strokeWidth: border, ...shadowProps(s.shadow) };
       g.add(
-        new Konva.Circle({
-          radius: s.size / 2,
-          fill: s.stroke,
-          stroke: "#ffffff",
-          strokeWidth: Math.max(1.5, s.size / 14),
-          ...shadowProps(s.shadow),
-        }),
+        kind === "circle"
+          ? new Konva.Circle({ ...body, radius: s.size / 2 })
+          : new Konva.Rect({
+              ...body,
+              x: -s.size / 2,
+              y: -s.size / 2,
+              width: s.size,
+              height: s.size,
+              cornerRadius: kind === "rounded" ? s.size * 0.28 : s.size * 0.06,
+            }),
       );
       g.add(
         new Konva.Text({
           text: String(s.n),
-          fontSize: s.size * 0.58,
+          fontSize: s.size * (s.n > 99 ? 0.42 : s.n > 9 ? 0.5 : 0.58),
           fontFamily: "Segoe UI, -apple-system, Helvetica, Arial, sans-serif",
           fontStyle: "bold",
           fill: s.textColor,
@@ -369,11 +395,26 @@ export function buildNode(s: Shape, image: HTMLCanvasElement): Konva.Node | null
           offsetY: s.size / 2,
           align: "center",
           verticalAlign: "middle",
+          listening: false,
         }),
       );
       return g;
     }
   }
+}
+
+/**
+ * Tail of a numbered step, relative to its centre: a wedge from a base across the middle of
+ * the badge to the tip. Null when there's no tip or it's inside the badge.
+ */
+export function badgeTailPoints(s: BadgeShape, tip: { x: number; y: number } | null | undefined): number[] | null {
+  if (!tip) return null;
+  const [dx, dy] = [tip.x - s.x, tip.y - s.y];
+  const len = Math.hypot(dx, dy);
+  if (len <= s.size / 2) return null;
+  const [ux, uy] = [dx / len, dy / len];
+  const half = s.size * 0.3;
+  return [-uy * half, ux * half, dx, dy, uy * half, -ux * half];
 }
 
 /** Render a document to a canvas at exact image pixels (crop applied). */
@@ -399,6 +440,8 @@ export class EditorStage {
   private draft: Konva.Node | null = null;
   private draftLabel: Konva.Label | null = null;
   private drawing: { start: Point; shape: Shape | null; kind: ToolId } | null = null;
+  /** An existing shape being dragged while a drawing tool is active (see `pickSameKind`). */
+  private moving: { id: string; start: Point; node: Konva.Node; origin: Point; moved: boolean } | null = null;
   private textarea: HTMLTextAreaElement | null = null;
   zoom = 1;
   tool: ToolId = "select";
@@ -503,6 +546,8 @@ export class EditorStage {
     if (style.shadow !== prev.shadow && s.type !== "blur" && s.type !== "highlighter") patch.shadow = style.shadow;
     if (style.fontSize !== prev.fontSize && (s.type === "text" || s.type === "callout")) patch.fontSize = style.fontSize;
     if (style.dim !== prev.dim && s.type === "spotlight") patch.dim = style.dim;
+    if (style.badgeSize !== prev.badgeSize && s.type === "badge") patch.size = style.badgeSize;
+    if (style.badgeKind !== prev.badgeKind && s.type === "badge") patch.kind = style.badgeKind;
     if (style.zoom !== prev.zoom && s.type === "magnify") patch.scale = style.zoom;
     if (style.fill !== prev.fill && (s.type === "rect" || s.type === "ellipse")) patch.fill = style.fill ? style.stroke + "33" : null;
     if (s.type === "blur" && (style.blurAmount !== prev.blurAmount || style.blurMode !== prev.blurMode)) {
@@ -549,10 +594,99 @@ export class EditorStage {
       );
       this.transformer.keepRatio(shape.type === "badge" || shape.type === "magnify");
       this.transformer.rotateEnabled(shape.type === "text");
-      this.transformer.nodes([node]);
+      // a numbered step resizes around its centre, by its body (not the tail)
+      this.transformer.centeredScaling(shape.type === "badge");
+      const target = shape.type === "badge" ? ((node as Konva.Group).findOne(".badge-body") ?? node) : node;
+      this.transformer.nodes([target]);
       this.transformer.moveToTop();
+      if (shape.type === "badge" && shape.tip) this.addTipAnchor(shape);
     }
     this.uiLayer.batchDraw();
+  }
+
+  /** Handle at the end of a numbered step's tail: drag to aim it. */
+  private addTipAnchor(shape: BadgeShape) {
+    const tip = shape.tip!;
+    const c = new Konva.Circle({
+      x: tip.x,
+      y: tip.y,
+      radius: 6 / this.zoom,
+      fill: "#ffffff",
+      stroke: "#4c8dff",
+      strokeWidth: 2 / this.zoom,
+      draggable: true,
+    });
+    c.on("dragmove", () => {
+      const tail = this.shapeLayer.findOne<Konva.Line>(`#${shape.id} .badge-tail`);
+      const pts = badgeTailPoints(shape, { x: c.x(), y: c.y() });
+      if (tail && pts) {
+        tail.points(pts);
+        this.shapeLayer.batchDraw();
+      }
+    });
+    c.on("dragend", () => this.commit(updateShape(this.doc, shape.id, { tip: { x: c.x(), y: c.y() } } as Partial<Shape>)));
+    c.on("mouseenter", () => (this.container.style.cursor = "move"));
+    c.on("mouseleave", () => (this.container.style.cursor = "default"));
+    this.uiLayer.add(c);
+    this.anchors.push(c);
+  }
+
+  /** Give the selected numbered step a tail (pointing down-right to start with) or remove it. */
+  setBadgeTail(on: boolean) {
+    const s = this.selectedShape();
+    if (s?.type !== "badge" || on === !!s.tip) return;
+    const tip = on ? { x: s.x + s.size * 1.8, y: s.y + s.size * 1.8 } : null;
+    this.commit(updateShape(this.doc, s.id, { tip } as Partial<Shape>));
+  }
+
+  /** Topmost shape of the active tool's kind under `p` (text and callouts count as one kind). */
+  private pickSameKind(p: Point): Shape | null {
+    const kinds: Partial<Record<ToolId, Shape["type"][]>> = {
+      text: ["text", "callout"],
+      callout: ["callout", "text"],
+      badge: ["badge"],
+      rect: ["rect"],
+      ellipse: ["ellipse"],
+      arrow: ["arrow"],
+      line: ["line"],
+      blur: ["blur"],
+      spotlight: ["spotlight"],
+      magnify: ["magnify"],
+    };
+    const want = kinds[this.tool];
+    if (!want) return null;
+    const tol = 6 / this.zoom;
+    for (let i = this.doc.shapes.length - 1; i >= 0; i--) {
+      const s = this.doc.shapes[i]!;
+      if (want.includes(s.type) && hitShape(s, p, tol)) return s;
+    }
+    return null;
+  }
+
+  private dragPicked(p: Point) {
+    const m = this.moving!;
+    const [dx, dy] = [p.x - m.start.x, p.y - m.start.y];
+    if (!m.moved && Math.hypot(dx, dy) < 2 / this.zoom) return;
+    if (!m.moved) {
+      // handles would lag behind the shape: they come back after the drop
+      this.anchors.forEach((a) => a.destroy());
+      this.anchors = [];
+      m.moved = true;
+    }
+    m.node.position({ x: m.origin.x + dx, y: m.origin.y + dy });
+    this.transformer.forceUpdate();
+    this.shapeLayer.batchDraw();
+    this.uiLayer.batchDraw();
+  }
+
+  private dropPicked() {
+    const m = this.moving!;
+    this.moving = null;
+    if (!m.moved) return;
+    const shape = this.doc.shapes.find((s) => s.id === m.id);
+    if (!shape) return;
+    const moved = moveShape(shape, m.node.x() - m.origin.x, m.node.y() - m.origin.y);
+    this.commit(updateShape(this.doc, m.id, moved));
   }
 
   private addEndpointAnchors(shape: LineShape | ArrowShape) {
@@ -627,7 +761,8 @@ export class EditorStage {
           break;
         }
         case "badge":
-          patch = { x: node.x(), y: node.y(), size: Math.max(12, shape.size * sx) };
+          // the body was scaled around the centre: only the size changes
+          patch = { size: Math.round(Math.min(160, Math.max(12, shape.size * sx))) };
           break;
       }
       this.commit(updateShape(this.doc, shape.id, patch));
@@ -698,14 +833,51 @@ export class EditorStage {
         if (target === st || target.hasName("bg")) this.select(null);
         return;
       }
+      // a handle of the selected shape (resize, tail tip, line ends): Konva drags it
+      if (e.target.getLayer() === this.uiLayer) return;
+      // pressing on an existing shape of the tool's own kind edits it instead of drawing anew
+      const picked = this.pickSameKind(p);
+      if (picked) {
+        if (picked.type === "text" || picked.type === "callout") {
+          this.editText(picked, false, true);
+          return;
+        }
+        this.select(picked.id);
+        const node = this.shapeLayer.findOne(`#${picked.id}`);
+        if (node) this.moving = { id: picked.id, start: p, node, origin: node.position(), moved: false };
+        return;
+      }
+      if (this.selectedId) this.select(null);
       this.beginDraw(p, e.evt as MouseEvent);
     });
     st.on("mousemove touchmove", (e) => {
       const p = this.pointer();
       this.events.onStatus(`${Math.round(p.x)}, ${Math.round(p.y)}`);
-      if (this.drawing) this.updateDraw(p, e.evt as MouseEvent);
+      if (this.moving) {
+        this.dragPicked(p);
+        return;
+      }
+      if (this.drawing) {
+        this.updateDraw(p, e.evt as MouseEvent);
+        return;
+      }
+      if (this.tool !== "select" && !this.textarea) {
+        // show that a click here picks up the existing shape
+        const over = this.pickSameKind(p);
+        this.container.style.cursor = over
+          ? over.type === "text" || over.type === "callout"
+            ? "text"
+            : "move"
+          : this.tool === "text"
+            ? "text"
+            : "crosshair";
+      }
     });
     st.on("mouseup touchend", (e) => {
+      if (this.moving) {
+        this.dropPicked();
+        return;
+      }
       if (this.drawing) this.endDraw(this.pointer(), e.evt as MouseEvent);
     });
     st.on("dblclick dbltap", (e) => {
@@ -761,8 +933,9 @@ export class EditorStage {
         return;
       }
       case "badge": {
-        const shape: Shape = { ...base, type: "badge", x: p.x, y: p.y, n: nextBadgeNumber(this.doc), size: st.badgeSize, textColor: "#ffffff" };
-        this.commit(addShape(this.doc, shape));
+        // a click places it; a drag points a tail at where the drag started
+        this.drawing = { start: p, shape: null, kind: "badge" };
+        this.replaceDraft(this.shapeForDrag("badge", p, p, evt)!);
         return;
       }
       case "pen":
@@ -827,6 +1000,21 @@ export class EditorStage {
         x = Math.max(0, Math.min(x, W - w));
         const y = Math.max(0, Math.min(src.y + src.height / 2 - h / 2, H - h));
         return { ...base, type: "magnify", src, x, y, scale: st.zoom, radius: 8, strokeWidth: 3 };
+      }
+      case "badge": {
+        // drag from the thing you're pointing at to where the number goes
+        const far = Math.hypot(p.x - start.x, p.y - start.y) >= Math.max(12, st.badgeSize * 0.75);
+        return {
+          ...base,
+          type: "badge",
+          x: far ? p.x : start.x,
+          y: far ? p.y : start.y,
+          n: nextBadgeNumber(this.doc),
+          size: st.badgeSize,
+          kind: st.badgeKind,
+          tip: far ? { x: start.x, y: start.y } : null,
+          textColor: "#ffffff",
+        };
       }
       case "callout": {
         // drag from the thing you're pointing at to where the bubble goes
@@ -917,6 +1105,10 @@ export class EditorStage {
       this.editText(shape, true);
       return;
     }
+    if (shape?.type === "badge") {
+      this.commit(addShape(this.doc, shape)); // a click places one too
+      return;
+    }
     if (!shape || !moved) return;
     if (shape.type === "magnify" && (shape.src.width < 4 || shape.src.height < 4)) return;
     if (isBox(shape) && (shape.width < 2 || shape.height < 2)) return;
@@ -991,7 +1183,9 @@ export class EditorStage {
   }
 
   // ---------- text editing ----------
-  editText(shape: TextShape | CalloutShape, isNew = false) {
+  /** `caretAtEnd`: continue typing after the existing text (a click with the text tool)
+   * rather than selecting it all (double-click to edit). */
+  editText(shape: TextShape | CalloutShape, isNew = false, caretAtEnd = false) {
     this.closeTextarea(false);
     const node = isNew ? null : this.shapeLayer.findOne<Konva.Label>(`#${shape.id}`);
     if (node) node.visible(false);
@@ -1051,7 +1245,8 @@ export class EditorStage {
     this.container.appendChild(ta);
     autosize();
     ta.focus();
-    ta.select();
+    if (caretAtEnd) ta.setSelectionRange(ta.value.length, ta.value.length);
+    else ta.select();
     // belt and braces: if anything else grabbed focus during this click, take it back
     requestAnimationFrame(() => {
       if (this.textarea === ta && document.activeElement !== ta) ta.focus();

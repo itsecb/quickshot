@@ -95,13 +95,20 @@ export interface BlurShape extends BaseShape {
   amount: number;
 }
 
+export type BadgeKind = "circle" | "rounded" | "square";
+
 export interface BadgeShape extends BaseShape {
   type: "badge";
+  /** centre */
   x: number;
   y: number;
   n: number;
   size: number;
   textColor: string;
+  /** outline shape (older documents have none: a circle) */
+  kind?: BadgeKind;
+  /** tail pointing at something, if any */
+  tip?: { x: number; y: number } | null;
 }
 
 /** Dims everything except this box (all spotlights share one dim layer). */
@@ -211,6 +218,45 @@ export function nextBadgeNumber(doc: Document): number {
   return doc.shapes.filter((s) => s.type === "badge").length + 1;
 }
 
+/**
+ * Is `p` on this shape, for picking an existing shape while its drawing tool is active?
+ * Outlines only for boxes, ellipses and lines (so a new box can still be drawn inside one);
+ * the whole area for filled boxes. `tol` is the grab margin in image px.
+ */
+export function hitShape(s: Shape, p: { x: number; y: number }, tol: number): boolean {
+  const near = (r: Rect, pad: number) =>
+    p.x >= r.x - pad && p.x <= r.x + r.width + pad && p.y >= r.y - pad && p.y <= r.y + r.height + pad;
+  switch (s.type) {
+    case "rect":
+    case "blur":
+    case "spotlight": {
+      const r = { x: s.x, y: s.y, width: s.width, height: s.height };
+      if (!near(r, tol)) return false;
+      if (s.type === "rect" && s.fill) return true;
+      const edge = tol + s.strokeWidth / 2;
+      return !(p.x > r.x + edge && p.x < r.x + r.width - edge && p.y > r.y + edge && p.y < r.y + r.height - edge);
+    }
+    case "ellipse": {
+      const rx = s.width / 2;
+      const ry = s.height / 2;
+      const d = Math.hypot((p.x - s.x - rx) / Math.max(rx, 1), (p.y - s.y - ry) / Math.max(ry, 1));
+      if (s.fill) return d <= 1 + tol / Math.min(rx, ry);
+      return Math.abs(d - 1) * Math.min(rx, ry) <= tol + s.strokeWidth / 2;
+    }
+    case "line":
+    case "arrow": {
+      const [dx, dy] = [s.x2 - s.x1, s.y2 - s.y1];
+      const len2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - s.x1) * dx + (p.y - s.y1) * dy) / len2));
+      return Math.hypot(p.x - (s.x1 + t * dx), p.y - (s.y1 + t * dy)) <= tol + s.strokeWidth / 2;
+    }
+    case "badge":
+      return Math.hypot(p.x - s.x, p.y - s.y) <= s.size / 2 + tol;
+    default:
+      return near(shapeBounds(s), tol);
+  }
+}
+
 /** Axis-aligned bounds of a shape, used for hit tests and keyboard nudges. */
 export function shapeBounds(s: Shape): Rect {
   switch (s.type) {
@@ -247,8 +293,14 @@ export function shapeBounds(s: Shape): Rect {
     }
     case "text":
       return { x: s.x, y: s.y, width: s.width ?? s.fontSize * 8, height: s.fontSize * 1.4 };
-    case "badge":
-      return { x: s.x - s.size / 2, y: s.y - s.size / 2, width: s.size, height: s.size };
+    case "badge": {
+      const r = s.size / 2;
+      const x0 = Math.min(s.x - r, s.tip?.x ?? Infinity);
+      const y0 = Math.min(s.y - r, s.tip?.y ?? Infinity);
+      const x1 = Math.max(s.x + r, s.tip?.x ?? -Infinity);
+      const y1 = Math.max(s.y + r, s.tip?.y ?? -Infinity);
+      return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+    }
   }
 }
 
@@ -258,9 +310,10 @@ export function moveShape(s: Shape, dx: number, dy: number): Shape {
     case "ellipse":
     case "blur":
     case "text":
-    case "badge":
     case "spotlight":
       return { ...s, x: s.x + dx, y: s.y + dy };
+    case "badge":
+      return { ...s, x: s.x + dx, y: s.y + dy, tip: s.tip ? { x: s.tip.x + dx, y: s.tip.y + dy } : s.tip };
     case "magnify":
       return { ...s, x: s.x + dx, y: s.y + dy, src: { ...s.src, x: s.src.x + dx, y: s.src.y + dy } };
     case "callout":

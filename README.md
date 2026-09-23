@@ -16,6 +16,9 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
   `A` arrow · `L` line · `R` rectangle · `O` ellipse · `P` pen · `H` highlighter · `T` text ·
   `N` numbered step badge · `B` blur/pixelate · `C` crop · `M` measure · `V` select ·
   `1`–`9` colours · `[` `]` width · `Ctrl+Z` undo · `Tab` next shape · arrows nudge
+  Numbered steps come in any size, as circles, rounded or square, and can have a tail: drag from
+  the thing the step is about to where the number goes. With any tool, clicking an existing shape
+  of that kind picks it up to move, resize or restyle it (text and callouts open for editing).
 * **Share**: `Ctrl+C` copy, `Ctrl+S` save with a filename pattern, `Ctrl+Shift+S` save as,
   drag the image straight into Teams/Outlook/browser/Explorer, `Ctrl+Shift+P` pin on top of everything.
   Optionally copy every capture to the clipboard while the editor opens.

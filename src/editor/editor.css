@@ -223,6 +223,44 @@
   padding: 2px 6px;
 }
 
+/* segmented choice (numbered step shape) */
+.seg {
+  display: inline-flex;
+}
+
+.seg button {
+  height: 28px;
+  min-width: 30px;
+  padding: 0 8px;
+  border-radius: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.seg button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.seg button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.seg button + button {
+  margin-left: -1px;
+}
+
+.seg button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  position: relative;
+}
+
+.hint-sm {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .canvas-host {
   position: relative;
   overflow: hidden;
