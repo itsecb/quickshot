@@ -17,10 +17,14 @@ mod redact;
 mod rules;
 mod settings;
 mod state;
+mod step_marks;
+mod steps;
 mod table;
 mod ticket;
 mod tray;
 mod uia;
+mod watch;
+mod watch_rules;
 mod windows;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
@@ -217,6 +221,16 @@ pub fn run() {
             commands::history::history_copy_rich,
             commands::history::history_diff,
             commands::history::history_compare,
+            commands::watches::watch_list,
+            commands::watches::watch_update,
+            commands::watches::watch_stop,
+            commands::watches::watch_snooze,
+            commands::watches::watch_stop_all,
+            commands::steps::steps_start,
+            commands::steps::steps_stop,
+            commands::steps::steps_pause,
+            commands::steps::steps_add_now,
+            commands::steps::steps_state,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

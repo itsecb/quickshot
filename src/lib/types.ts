@@ -7,7 +7,7 @@ export interface Rect {
   height: number;
 }
 
-export type CaptureMode = "region" | "window" | "fullscreen" | "repeatLast" | "ocr" | "pin" | "color" | "qr";
+export type CaptureMode = "region" | "window" | "fullscreen" | "repeatLast" | "ocr" | "pin" | "color" | "qr" | "watch";
 
 export interface MonitorInfo {
   id: number;
@@ -58,6 +58,8 @@ export interface Hotkeys {
   history: string;
   delayedRegion: string;
   qr: string;
+  watch: string;
+  recordSteps: string;
 }
 
 export type ImageFormat = "png" | "jpeg";
@@ -129,6 +131,25 @@ export interface DiffResult {
   boxes: Rect[];
   changedPercent: number;
   sameSize: boolean;
+}
+
+export type WatchCondition =
+  | { kind: "change"; minPercent: number }
+  | { kind: "textAppears"; pattern: string }
+  | { kind: "textGone"; pattern: string };
+
+export interface WatchInfo {
+  id: number;
+  name: string;
+  rect: Rect;
+  intervalSecs: number;
+  condition: WatchCondition;
+  started: string;
+  lastCheck: string | null;
+  checks: number;
+  alerts: number;
+  paused: boolean;
+  error: string | null;
 }
 
 export interface RedactMatch {

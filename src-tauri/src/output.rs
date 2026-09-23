@@ -18,7 +18,7 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
     let settings = state.settings();
     let produces_image = !matches!(
         mode,
-        CaptureMode::Ocr | CaptureMode::Color | CaptureMode::Qr
+        CaptureMode::Ocr | CaptureMode::Color | CaptureMode::Qr | CaptureMode::Watch
     );
     let rule = produces_image
         .then(|| {
@@ -87,7 +87,7 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
             })?;
             Ok(())
         }
-        CaptureMode::Color => Ok(()),
+        CaptureMode::Color | CaptureMode::Watch => Ok(()),
         CaptureMode::Qr => {
             let codes = qr::decode(&capture.image);
             state.remove_capture(capture.id);

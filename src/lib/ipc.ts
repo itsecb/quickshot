@@ -5,6 +5,8 @@ import type {
   AppPaths,
   ApplyResult,
   DiffResult,
+  WatchCondition,
+  WatchInfo,
   CaptureMode,
   DirEntry,
   EditorInit,
@@ -89,7 +91,7 @@ export const copyImageRich = (png: Uint8Array, id: number) =>
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<ApplyResult>("set_settings", { settings });
 export const appPaths = () => invoke<AppPaths>("app_paths");
-export const openWindow = (name: "main" | "guide" | "history") => invoke<void>("open_window", { name });
+export const openWindow = (name: "main" | "guide" | "history" | "watches") => invoke<void>("open_window", { name });
 export const hideMain = () => invoke<void>("hide_main");
 
 // ---- files ----
@@ -111,6 +113,10 @@ export interface PendingStep {
   width: number;
   height: number;
   pngUrl: string;
+  /** the step's own title (step recorder) */
+  stepTitle: string;
+  /** put these steps into a new guide with this name */
+  project: string | null;
 }
 export const guidePushStep = (png: Uint8Array, title: string) =>
   invokeRaw<number>("guide_push_step", png, { "x-title": title });
@@ -130,3 +136,23 @@ export const historyDiff = (a: number, b: number) => invoke<DiffResult>("history
 export const historyCompare = (a: number, b: number) => invoke<void>("history_compare", { a, b });
 export const historyCopyRich = (id: number) => invoke<string>("history_copy_rich", { id });
 export const historySetNote = (id: number, note: string) => invoke<void>("history_set_note", { id, note });
+
+// ---- watches ----
+export const watchList = () => invoke<WatchInfo[]>("watch_list");
+export const watchUpdate = (id: number, intervalSecs: number, condition: WatchCondition, paused: boolean) =>
+  invoke<void>("watch_update", { id, intervalSecs, condition, paused });
+export const watchStop = (id: number) => invoke<void>("watch_stop", { id });
+export const watchStopAll = () => invoke<void>("watch_stop_all");
+export const watchSnooze = (id: number, minutes: number) => invoke<void>("watch_snooze", { id, minutes });
+
+// ---- step recorder ----
+export interface RecorderState {
+  recording: boolean;
+  paused: boolean;
+  count: number;
+}
+export const stepsStart = () => invoke<void>("steps_start");
+export const stepsStop = () => invoke<number>("steps_stop");
+export const stepsPause = (paused: boolean) => invoke<void>("steps_pause", { paused });
+export const stepsAddNow = () => invoke<void>("steps_add_now");
+export const stepsState = () => invoke<RecorderState>("steps_state");

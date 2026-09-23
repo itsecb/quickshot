@@ -20,6 +20,8 @@ pub struct Hotkeys {
     pub history: String,
     pub delayed_region: String,
     pub qr: String,
+    pub watch: String,
+    pub record_steps: String,
 }
 
 impl Default for Hotkeys {
@@ -35,6 +37,8 @@ impl Default for Hotkeys {
             history: "Ctrl+Shift+H".into(),
             delayed_region: "Ctrl+Shift+5".into(),
             qr: "Ctrl+Shift+Q".into(),
+            watch: "Ctrl+Shift+W".into(),
+            record_steps: "Ctrl+Shift+R".into(),
         }
     }
 }

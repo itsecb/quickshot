@@ -28,6 +28,13 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 * **Before/after compare**: select two captures in History (or one, to compare with the previous
   capture of the same window) and press `C`. Auto-aligns shifted captures, then shows changed areas,
   side by side, a swipe slider, or blink.
+* **Watch a region** (`Ctrl+Shift+W`): point at a dashboard tile, status page or log window and
+  QuickShot checks it every few seconds, alerting when it changes or when text like *Failed*
+  appears/disappears. Alerts show the change and open a before/after compare; both images go to
+  History (`#watch`). Manage watches in the Watches window.
+* **Step recorder** (`Ctrl+Shift+R`, Windows): every click captures the clicked window with the
+  spot circled and a title like *Click the “Save” button in Notepad*; stop and the steps open as a
+  new guide ready to export to Word/HTML/Markdown. No keystrokes are recorded.
 * **Per-app rules** (Settings → Rules): skip history, auto-redact, always copy, or also save to a folder
   based on the app or window title. Ships with a rule that keeps password managers out of history.
 * **Scriptable capture**: `quickshot --out <file|folder>` captures with no UI and a real exit code

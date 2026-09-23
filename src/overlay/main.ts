@@ -167,6 +167,8 @@ class Overlay {
         return "Click to copy HEX · Shift+click for RGB · Esc cancels";
       case "qr":
         return "Select a QR code or barcode to copy its contents · Esc cancels";
+      case "watch":
+        return "Select a region, or click a window or part of one, to watch for changes · Esc cancels";
       default:
         return "Drag a region (Alt: no snapping) · click a window or part · scroll for bigger/smaller parts · Esc cancels";
     }

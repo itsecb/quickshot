@@ -14,12 +14,22 @@ pub fn element_chain(window_id: u32, x: i32, y: i32) -> Vec<Rect> {
     imp::element_chain(window_id, x, y)
 }
 
+/// Name and (localized) control type of the element at a screen point, e.g. ("Save", "button").
+/// Used by the step recorder while nothing of ours covers the screen.
+pub fn element_label(x: i32, y: i32) -> Option<(String, String)> {
+    imp::element_label(x, y)
+}
+
 #[cfg(not(windows))]
 mod imp {
     use crate::geom::Rect;
 
     pub fn element_chain(_window_id: u32, _x: i32, _y: i32) -> Vec<Rect> {
         Vec::new()
+    }
+
+    pub fn element_label(_x: i32, _y: i32) -> Option<(String, String)> {
+        None
     }
 }
 
@@ -29,7 +39,7 @@ mod imp {
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
-    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
     };
@@ -45,11 +55,18 @@ mod imp {
     const BUDGET: Duration = Duration::from_millis(150);
     const MAX_DEPTH: usize = 40;
 
-    struct Job {
-        window_id: u32,
-        x: i32,
-        y: i32,
-        reply: Sender<Vec<Rect>>,
+    enum Job {
+        Chain {
+            window_id: u32,
+            x: i32,
+            y: i32,
+            reply: Sender<Vec<Rect>>,
+        },
+        Label {
+            x: i32,
+            y: i32,
+            reply: Sender<Option<(String, String)>>,
+        },
     }
 
     /// UI Automation objects live on one COM thread; callers talk to it through a channel.
@@ -65,14 +82,27 @@ mod imp {
                         log::warn!("UI Automation unavailable: {e}");
                     }
                     for job in rx {
-                        let chain = match &probe {
-                            Ok(p) => p.chain(job.window_id, job.x, job.y).unwrap_or_else(|e| {
-                                log::debug!("element chain failed: {e}");
-                                Vec::new()
-                            }),
-                            Err(_) => Vec::new(),
-                        };
-                        let _ = job.reply.send(chain);
+                        match job {
+                            Job::Chain {
+                                window_id,
+                                x,
+                                y,
+                                reply,
+                            } => {
+                                let chain = match &probe {
+                                    Ok(p) => p.chain(window_id, x, y).unwrap_or_else(|e| {
+                                        log::debug!("element chain failed: {e}");
+                                        Vec::new()
+                                    }),
+                                    Err(_) => Vec::new(),
+                                };
+                                let _ = reply.send(chain);
+                            }
+                            Job::Label { x, y, reply } => {
+                                let label = probe.as_ref().ok().and_then(|p| p.label(x, y).ok());
+                                let _ = reply.send(label);
+                            }
+                        }
                     }
                 })
                 .expect("spawn UI Automation thread");
@@ -80,9 +110,19 @@ mod imp {
         })
     }
 
+    pub fn element_label(x: i32, y: i32) -> Option<(String, String)> {
+        let (reply, answer) = channel();
+        worker()
+            .lock()
+            .unwrap()
+            .send(Job::Label { x, y, reply })
+            .ok()?;
+        answer.recv_timeout(Duration::from_secs(2)).ok().flatten()
+    }
+
     pub fn element_chain(window_id: u32, x: i32, y: i32) -> Vec<Rect> {
         let (reply, answer) = channel();
-        let sent = worker().lock().unwrap().send(Job {
+        let sent = worker().lock().unwrap().send(Job::Chain {
             window_id,
             x,
             y,
@@ -129,6 +169,19 @@ mod imp {
                     cache,
                     condition,
                 })
+            }
+        }
+
+        fn label(&self, x: i32, y: i32) -> windows::core::Result<(String, String)> {
+            // SAFETY: UI Automation calls on the thread that created these interfaces.
+            unsafe {
+                let el = self.automation.ElementFromPoint(POINT { x, y })?;
+                let name = el.CurrentName().map(|b| b.to_string()).unwrap_or_default();
+                let control = el
+                    .CurrentLocalizedControlType()
+                    .map(|b| b.to_string())
+                    .unwrap_or_default();
+                Ok((name, control))
             }
         }
 

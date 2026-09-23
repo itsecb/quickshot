@@ -1,0 +1,67 @@
+html,
+body,
+#app {
+  background: transparent;
+  height: 100%;
+}
+
+#app {
+  padding: 6px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px 0 14px;
+  border-radius: 999px;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  animation: qs-slide-up 0.25s var(--ease) both;
+  font-size: 12px;
+}
+
+.rec {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff453a;
+  flex: none;
+  animation: rec-pulse 1.4s ease-in-out infinite;
+}
+
+.bar.paused .rec {
+  background: var(--fg-muted);
+  animation: none;
+}
+
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.status {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar button {
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: transparent;
+  color: inherit;
+  border-color: var(--chrome-border);
+}
+
+.bar button.primary {
+  background: #ff453a;
+  border-color: #ff453a;
+  color: #fff;
+}

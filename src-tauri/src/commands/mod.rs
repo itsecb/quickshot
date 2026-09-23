@@ -4,6 +4,8 @@ pub mod guide;
 pub mod history;
 pub mod output;
 pub mod settings;
+pub mod steps;
+pub mod watches;
 
 use tauri::ipc::{InvokeBody, Request};
 

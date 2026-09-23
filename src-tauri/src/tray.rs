@@ -62,6 +62,25 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
         .item(&item("capture_color", "Pick color", &hk.color)?)
         .item(&item("capture_qr", "Read QR code / barcode", &hk.qr)?)
         .separator()
+        .item(&item("capture_watch", "Watch a region…", &hk.watch)?)
+        .item(&item(
+            "steps_toggle",
+            &if crate::steps::is_recording() {
+                format!("Stop recording steps ({})", crate::steps::state().count)
+            } else {
+                "Record steps…".to_string()
+            },
+            &hk.record_steps,
+        )?)
+        .item(&item(
+            "open_watches",
+            &match crate::watch::list().len() {
+                0 => "Watches…".to_string(),
+                n => format!("Watches ({n} running)…"),
+            },
+            "",
+        )?)
+        .separator()
         .item(&item("open_history", "History…", &hk.history)?)
         .item(&item("open_guides", "Guides…", "")?)
         .item(&item("open_settings", "Settings…", "")?)
@@ -97,6 +116,9 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
             "capture_pin" => capture::trigger(app, CaptureMode::Pin),
             "capture_color" => capture::trigger(app, CaptureMode::Color),
             "capture_qr" => capture::trigger(app, CaptureMode::Qr),
+            "capture_watch" => capture::trigger(app, CaptureMode::Watch),
+            "steps_toggle" => crate::steps::toggle(app),
+            "open_watches" => windows::open_watches(app),
             "open_history" => windows::open_history(app),
             "open_guides" => windows::open_guide(app),
             "open_settings" => windows::show_main(app),

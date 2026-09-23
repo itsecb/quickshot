@@ -1,0 +1,60 @@
+/* builds on the capture thumbnail's card (thumb.css) */
+.alert .bell {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ff9f0a;
+  color: #1b1d21;
+  font-size: 12px;
+  font-weight: 800;
+  animation: qs-pop 0.4s var(--ease) 0.15s both;
+}
+
+.alert .time {
+  font-size: 11px;
+}
+
+.alert .reason {
+  padding: 0 12px 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.alert .shot {
+  cursor: default;
+}
+
+.alert .frame {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.alert .frame img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.alert .frame svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.alert .frame rect {
+  fill: rgba(255, 69, 58, 0.15);
+  stroke: #ff453a;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.alert .actions .primary-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

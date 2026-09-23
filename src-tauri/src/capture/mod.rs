@@ -38,6 +38,18 @@ const OWN_APP_NAMES: &[&str] = &["QuickShot", "quickshot"];
 
 /// Capture every monitor. Runs on the calling thread (~30-80 ms per monitor).
 pub fn capture_all_monitors() -> AppResult<Vec<CaptureFrame>> {
+    capture_monitors(|_| true)
+}
+
+/// Capture `rect` (global physical px) right now, grabbing only the monitors it touches.
+/// Used by watches, which re-check every few seconds.
+pub fn capture_rect_live(rect: Rect) -> AppResult<RgbaImage> {
+    let frames = capture_monitors(|m| m.intersect(&rect).is_some())?;
+    compose_region(&frames, rect)
+}
+
+/// Capture the monitors whose (approximate, pre-capture) rect passes `wanted`.
+fn capture_monitors(wanted: impl Fn(&Rect) -> bool) -> AppResult<Vec<CaptureFrame>> {
     let monitors = xcap::Monitor::all()?;
     if monitors.is_empty() {
         return Err(AppError::Capture("no monitors found".into()));
@@ -45,6 +57,22 @@ pub fn capture_all_monitors() -> AppResult<Vec<CaptureFrame>> {
     let mut frames = Vec::with_capacity(monitors.len());
     for m in monitors {
         let id = m.id()?;
+        let scale = m.scale_factor().map(|s| s as f64).unwrap_or(1.0);
+        let (x, y, w, h) = (m.x()?, m.y()?, m.width()?, m.height()?);
+        let approx = if monitors::COORDS_ARE_LOGICAL {
+            let s = if scale > 0.0 { scale } else { 1.0 };
+            Rect::new(
+                (x as f64 * s) as i32,
+                (y as f64 * s) as i32,
+                (w as f64 * s) as u32,
+                (h as f64 * s) as u32,
+            )
+        } else {
+            Rect::new(x, y, w, h)
+        };
+        if !wanted(&approx) {
+            continue;
+        }
         let image = match m.capture_image() {
             Ok(img) => img,
             Err(e) => {
@@ -53,11 +81,11 @@ pub fn capture_all_monitors() -> AppResult<Vec<CaptureFrame>> {
             }
         };
         let raw = monitors::RawGeometry {
-            x: m.x()?,
-            y: m.y()?,
-            width: m.width()?,
-            height: m.height()?,
-            scale: m.scale_factor().map(|s| s as f64).unwrap_or(1.0),
+            x,
+            y,
+            width: w,
+            height: h,
+            scale,
         };
         let rect = monitors::to_physical(raw, image.dimensions(), monitors::COORDS_ARE_LOGICAL);
         let name = m
@@ -559,6 +587,18 @@ pub fn finish(app: &AppHandle, rect: Rect, window_id: Option<u32>) -> AppResult<
         .find(|f| f.monitor.rect().intersect(&rect).is_some())
     {
         source.monitor_name = frame.monitor.name.clone();
+    }
+    if session.mode == CaptureMode::Watch {
+        // not a screenshot: keep an eye on this region from now on
+        let name = if source.title.is_empty() {
+            source.app_name.clone()
+        } else {
+            source.title.clone()
+        };
+        crate::watch::start(app, rect, name);
+        let app2 = app.clone();
+        app.run_on_main_thread(move || crate::windows::open_watches(&app2))?;
+        return Ok(0);
     }
     if matches!(session.mode, CaptureMode::Region | CaptureMode::Window) {
         *state.last_region.lock().unwrap() = Some(rect);

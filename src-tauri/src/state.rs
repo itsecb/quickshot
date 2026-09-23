@@ -23,6 +23,7 @@ pub enum CaptureMode {
     Pin,
     Color,
     Qr,
+    Watch,
 }
 
 impl CaptureMode {
@@ -36,6 +37,7 @@ impl CaptureMode {
             "pin" => Self::Pin,
             "color" => Self::Color,
             "qr" | "barcode" => Self::Qr,
+            "watch" => Self::Watch,
             _ => return None,
         })
     }

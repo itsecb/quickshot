@@ -144,6 +144,96 @@ pub fn open_thumb(app: &AppHandle, capture: &Capture, status: &str) -> AppResult
     Ok(())
 }
 
+/// The list of running watches (interval, rule, pause, stop).
+pub fn open_watches(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("watches") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return;
+    }
+    let builder = WebviewWindowBuilder::new(app, "watches", WebviewUrl::App("watches.html".into()))
+        .title("QuickShot Watches")
+        .inner_size(560.0, 460.0)
+        .min_inner_size(420.0, 300.0)
+        .center();
+    build_hidden(builder, "watches");
+}
+
+/// Alert card for a watch, in the corner like the capture thumbnail. One per watch: a newer
+/// alert replaces the previous one. `init` is the card's JSON payload.
+pub fn open_alert(app: &AppHandle, watch_id: u64, init: &str) -> AppResult<()> {
+    let label = format!("alert-{watch_id}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.destroy();
+    }
+    let (w, h) = (360.0, 300.0);
+    let (cx, cy) = app
+        .cursor_position()
+        .map(|p| (p.x as i32, p.y as i32))
+        .unwrap_or((0, 0));
+    let (scale, work) = monitor_at(app, cx, cy);
+    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("alert.html".into()))
+        .title("QuickShot watch alert")
+        .initialization_script(format!("window.__QS_ALERT = {init};"))
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .transparent(true)
+        .focused(false)
+        .focusable(false)
+        .visible(false)
+        .inner_size(w, h)
+        .build()?;
+    if let Some(area) = work {
+        let margin = 12.0 * scale;
+        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
+        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
+        let _ = window.set_position(PhysicalPosition::new(px, py));
+    }
+    show_fallback(&window);
+    Ok(())
+}
+
+pub const RECORDER_LABEL: &str = "recorder";
+
+/// Floating control bar while the step recorder runs: bottom-centre of the cursor's monitor,
+/// never focused (clicks on it are ignored by the recorder).
+pub fn open_recorder(app: &AppHandle) -> AppResult<()> {
+    if app.get_webview_window(RECORDER_LABEL).is_some() {
+        return Ok(());
+    }
+    let (w, h) = (440.0, 64.0);
+    let (cx, cy) = app
+        .cursor_position()
+        .map(|p| (p.x as i32, p.y as i32))
+        .unwrap_or((0, 0));
+    let (scale, work) = monitor_at(app, cx, cy);
+    let window =
+        WebviewWindowBuilder::new(app, RECORDER_LABEL, WebviewUrl::App("recorder.html".into()))
+            .title("QuickShot step recorder")
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .transparent(true)
+            .focused(false)
+            .focusable(false)
+            .visible(false)
+            .inner_size(w, h)
+            .build()?;
+    if let Some(area) = work {
+        let px = area.position.x + ((area.size.width as f64 - w * scale) / 2.0) as i32;
+        let py = area.position.y + area.size.height as i32 - (h * scale + 16.0 * scale) as i32;
+        let _ = window.set_position(PhysicalPosition::new(px, py));
+    }
+    show_fallback(&window);
+    Ok(())
+}
+
 pub const COUNTDOWN_LABEL: &str = "countdown";
 
 /// Small always-on-top countdown in the corner of the cursor's monitor. It never takes focus,

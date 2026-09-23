@@ -100,7 +100,11 @@
   async function ingestPending() {
     const pending = await guidePullSteps();
     if (pending.length === 0) return;
-    if (!current) {
+    // a step recording arrives as its own new guide
+    const project = pending.find((p) => p.project)?.project;
+    if (project) {
+      await createProject(project);
+    } else if (!current) {
       await createProject(pending[0]!.title ? `Guide: ${pending[0]!.title}` : "New guide");
     }
     for (const p of pending) await addPendingStep(p);
@@ -117,7 +121,7 @@
     const id = Math.random().toString(36).slice(2, 8);
     const image = stepFileName(current.project.steps.length, id);
     await writeStepImage(current.dir, image, png);
-    current.project.steps.push({ id, title: "", body: "", image, width: p.width, height: p.height });
+    current.project.steps.push({ id, title: p.stepTitle ?? "", body: "", image, width: p.width, height: p.height });
     thumbs = { ...thumbs, [image]: URL.createObjectURL(new Blob([png], { type: "image/png" })) };
   }
 

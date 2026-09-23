@@ -113,40 +113,58 @@ pub fn spawn_record(app: &AppHandle, capture: Arc<Capture>) {
 }
 
 fn record(app: &AppHandle, capture: &Capture) -> AppResult<()> {
+    store(app, &capture.image, &capture.source, capture.created, "").map(|_| ())
+}
+
+/// Record an image now (synchronously) with a note, e.g. a watch's before/after, and return
+/// its history id. Records even when capture history is switched off, since the caller asked.
+pub fn record_image(
+    app: &AppHandle,
+    image: &RgbaImage,
+    source: &CaptureSource,
+    note: &str,
+) -> AppResult<u64> {
+    store(app, image, source, chrono::Local::now(), note)
+}
+
+fn store(
+    app: &AppHandle,
+    image: &RgbaImage,
+    source: &CaptureSource,
+    created: chrono::DateTime<chrono::Local>,
+    note: &str,
+) -> AppResult<u64> {
     let settings = app.state::<AppState>().settings();
     let id = new_id();
     let dir = entry_dir(app, id)?;
     std::fs::create_dir_all(&dir)?;
-    let (width, height) = capture.image.dimensions();
+    let (width, height) = image.dimensions();
     let stem = settings::expand_pattern(
         &settings.file_pattern,
-        &capture.source.app_name,
-        &capture.source.title,
+        &source.app_name,
+        &source.title,
         width,
         height,
     );
     let file_name = format!("{stem}.png");
-    std::fs::write(dir.join(&file_name), encode_png(&capture.image)?)?;
-    std::fs::write(
-        dir.join(THUMB),
-        encode_jpeg(&thumbnail(&capture.image), 82)?,
-    )?;
+    std::fs::write(dir.join(&file_name), encode_png(image)?)?;
+    std::fs::write(dir.join(THUMB), encode_jpeg(&thumbnail(image), 82)?)?;
     let entry = HistoryEntry {
         id,
-        created: capture.created.to_rfc3339(),
+        created: created.to_rfc3339(),
         width,
         height,
         file_name,
-        source: capture.source.clone(),
+        source: source.clone(),
         ocr_text: None,
         starred: false,
-        note: String::new(),
+        note: note.to_string(),
     };
     write_meta(&dir, &entry)?;
     prune(app, &settings);
     let _ = app.emit(CHANGED_EVENT, ());
     queue_ocr(id, true);
-    Ok(())
+    Ok(id)
 }
 
 /// meta.json is replaced atomically so a crash never leaves a half-written file.

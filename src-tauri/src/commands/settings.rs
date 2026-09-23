@@ -81,6 +81,7 @@ pub fn open_window(app: AppHandle, name: String) {
     match name.as_str() {
         "guide" => windows::open_guide(&app),
         "history" => windows::open_history(&app),
+        "watches" => windows::open_watches(&app),
         _ => windows::show_main(&app),
     }
 }

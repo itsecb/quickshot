@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { appPaths, getSettings, hideMain, historyList, openWindow, setSettings, triggerCapture } from "$lib/ipc";
+  import { appPaths, getSettings, hideMain, historyList, openWindow, setSettings, stepsStart, triggerCapture } from "$lib/ipc";
   import type { AppPaths, CaptureMode, Rule, Settings } from "$lib/types";
   import { acceleratorFromEvent } from "./hotkey";
 
@@ -66,7 +66,7 @@
     callout: "Callout",
   };
 
-  const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode | "history" | "delayed" }[] = [
+  const HOTKEY_LABELS: { key: keyof Settings["hotkeys"]; label: string; mode: CaptureMode | "history" | "delayed" | "steps" }[] = [
     { key: "region", label: "Capture region", mode: "region" },
     { key: "window", label: "Capture window", mode: "window" },
     { key: "fullscreen", label: "Capture full screen", mode: "fullscreen" },
@@ -76,6 +76,8 @@
     { key: "pin", label: "Pin region to screen", mode: "pin" },
     { key: "color", label: "Pick a colour", mode: "color" },
     { key: "qr", label: "Read QR code / barcode", mode: "qr" },
+    { key: "watch", label: "Watch a region for changes", mode: "watch" },
+    { key: "recordSteps", label: "Record steps (start / stop)", mode: "steps" },
     { key: "history", label: "Open history", mode: "history" },
   ];
 
@@ -129,8 +131,12 @@
     if (typeof dir === "string") settings[target] = dir;
   }
 
-  async function capture(mode: CaptureMode | "history" | "delayed") {
+  async function capture(mode: CaptureMode | "history" | "delayed" | "steps") {
     if (mode === "history") return openWindow("history");
+    if (mode === "steps") {
+      await hideMain();
+      return stepsStart().catch((e) => (error = String(e)));
+    }
     await hideMain();
     if (mode === "delayed") return void triggerCapture("region", settings?.captureDelaySecs ?? 3);
     setTimeout(() => void triggerCapture(mode), 150);

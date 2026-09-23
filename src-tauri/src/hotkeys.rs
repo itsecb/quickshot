@@ -26,6 +26,7 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
         (settings.hotkeys.pin.as_str(), CaptureMode::Pin),
         (settings.hotkeys.color.as_str(), CaptureMode::Color),
         (settings.hotkeys.qr.as_str(), CaptureMode::Qr),
+        (settings.hotkeys.watch.as_str(), CaptureMode::Watch),
     ];
     let mut conflicts = Vec::new();
     for (accel, mode) in bindings {
@@ -54,6 +55,18 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
         if let Err(e) = result {
             log::warn!("hotkey {delayed} (delayed region) not registered: {e}");
             conflicts.push(format!("{delayed}: {e}"));
+        }
+    }
+    let record = settings.hotkeys.record_steps.trim();
+    if !record.is_empty() {
+        let result = gs.on_shortcut(record, |app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                crate::steps::toggle(app);
+            }
+        });
+        if let Err(e) = result {
+            log::warn!("hotkey {record} (step recorder) not registered: {e}");
+            conflicts.push(format!("{record}: {e}"));
         }
     }
     let history = settings.hotkeys.history.trim();
