@@ -344,10 +344,42 @@ fn countdown(app: &AppHandle, secs: u32) -> AppResult<bool> {
     Ok(!cancelled)
 }
 
+/// Without Screen Recording permission macOS doesn't fail: it returns the wallpaper with every
+/// window removed, which shows up as a gray overlay. Check first and point to the setting.
+#[cfg(target_os = "macos")]
+fn ensure_screen_permission(app: &AppHandle) -> bool {
+    use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
+    use tauri_plugin_opener::OpenerExt;
+    if CGPreflightScreenCaptureAccess() {
+        return true;
+    }
+    // first time: the system prompt, which also adds QuickShot to the list in Settings
+    CGRequestScreenCaptureAccess();
+    let _ = app.opener().open_url(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        None::<&str>,
+    );
+    crate::windows::toast(
+        app,
+        "Screen Recording permission needed",
+        "Turn on QuickShot in Privacy & Security → Screen Recording, then quit and reopen it. \
+         After an update, switch it off and on again.",
+    );
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_screen_permission(_app: &AppHandle) -> bool {
+    true
+}
+
 fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
     let state = app.state::<AppState>();
     if state.session.lock().unwrap().is_some() {
         log::info!("capture already in progress; ignoring {mode:?}");
+        return Ok(());
+    }
+    if !ensure_screen_permission(app) {
         return Ok(());
     }
     let frames = capture_all_monitors()?;
