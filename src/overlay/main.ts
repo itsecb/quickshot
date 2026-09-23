@@ -2,7 +2,7 @@
 // drag a region, click a window or a pixel, and hands the result to Rust.
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { cancelCapture, copyText, finishCapture, overlayInit, overlayReady } from "$lib/ipc";
+import { cancelCapture, copyText, elementChain, finishCapture, overlayInit, overlayReady } from "$lib/ipc";
 import { fetchRawToCanvas } from "$lib/image";
 import { rectContains, rectEdges, rectEquals, rectFromPoints, rectIntersect, rectRound, snapPoint, type Edge } from "$lib/geometry";
 import { rgbToHex } from "$lib/image";
@@ -25,6 +25,10 @@ const FADE_MS = REDUCED_MOTION ? 1 : 150;
 const GLIDE_MS = REDUCED_MOTION ? 1 : 120;
 const FLASH_MS = 140;
 const SNAP_PX = 8;
+/** Pause this long over a window before asking for its parts (UI Automation is cross-process). */
+const ELEMENT_DELAY_MS = 60;
+/** Smallest part picked automatically (px at 100% scale); smaller ones are a wheel-scroll away. */
+const MIN_PART = { w: 40, h: 20 };
 const GRADIENT = ["#4c8dff", "#7b5cff", "#35d0ff"];
 
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -105,6 +109,14 @@ class Overlay {
   private snapGuide: { x: number | null; y: number | null } = { x: null, y: null };
   private vEdges: Edge[] = [];
   private hEdges: Edge[] = [];
+  // UI element detection: nested parts of the hovered window, outermost (the window) first
+  private chain: Rect[] | null = null;
+  private chainWindow: number | null = null;
+  private level = 0;
+  /** depth chosen with the wheel; kept while moving within the same window */
+  private pinnedDepth: number | null = null;
+  private querySeq = 0;
+  private queryTimer = 0;
 
   constructor() {
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
@@ -146,7 +158,7 @@ class Overlay {
   private hintText(): string {
     switch (this.init.mode) {
       case "window":
-        return "Click a window · drag for a region · Esc cancels";
+        return "Click a window or part of one · scroll for bigger/smaller parts · drag for a region · Esc cancels";
       case "ocr":
         return "Select text to copy · Esc cancels";
       case "pin":
@@ -156,7 +168,7 @@ class Overlay {
       case "qr":
         return "Select a QR code or barcode to copy its contents · Esc cancels";
       default:
-        return "Drag a region (Alt: no snapping) · click a window · Enter = whole screen · Esc cancels";
+        return "Drag a region (Alt: no snapping) · click a window or part · scroll for bigger/smaller parts · Esc cancels";
     }
   }
 
@@ -183,6 +195,61 @@ class Overlay {
     return { x: m.x, y: m.y, width: m.width, height: m.height };
   }
 
+  /** What hovering highlights: the chosen part of the window when known, else the window. */
+  private hoverRect(): Rect | null {
+    const w = this.hoverWindow;
+    if (!w) return null;
+    if (this.chain && this.chainWindow === w.id) return this.chain[this.level] ?? w.rect;
+    return w.rect;
+  }
+
+  /** Ask (debounced) for the parts of the hovered window under the pointer. */
+  private queueElementQuery(global: Point) {
+    clearTimeout(this.queryTimer);
+    const w = this.hoverWindow;
+    if (!w || this.dragStart || this.init.mode === "color") return;
+    if (this.chainWindow !== w.id) {
+      // new window: start from the whole window until its parts arrive
+      this.chain = null;
+      this.chainWindow = w.id;
+      this.pinnedDepth = null;
+    }
+    this.queryTimer = window.setTimeout(async () => {
+      const seq = ++this.querySeq;
+      let chain: Rect[];
+      try {
+        chain = await elementChain(w.id, global.x, global.y);
+      } catch {
+        return;
+      }
+      if (seq !== this.querySeq || this.hoverWindow?.id !== w.id || this.dragStart) return; // stale
+      this.chain = chain.length > 1 ? chain : null;
+      this.level = this.chain ? this.pickLevel(this.chain) : 0;
+      this.schedule();
+    }, ELEMENT_DELAY_MS);
+  }
+
+  /** Deepest part that isn't tiny, or the depth the user picked with the wheel. */
+  private pickLevel(chain: Rect[]): number {
+    if (this.pinnedDepth !== null) return Math.min(this.pinnedDepth, chain.length - 1);
+    for (let i = chain.length - 1; i > 0; i--) {
+      const r = chain[i]!;
+      if (r.width >= MIN_PART.w * this.dpr && r.height >= MIN_PART.h * this.dpr) return i;
+    }
+    return 0;
+  }
+
+  private onWheel(e: WheelEvent) {
+    if (!this.chain || this.dragStart || this.finished) return;
+    e.preventDefault();
+    // wheel up = bigger (towards the whole window), down = smaller (deeper)
+    const next = Math.max(0, Math.min(this.chain.length - 1, this.level + (e.deltaY > 0 ? 1 : -1)));
+    if (next === this.level) return;
+    this.level = next;
+    this.pinnedDepth = next;
+    this.schedule();
+  }
+
   private windowAt(global: Point): WindowInfo | null {
     // windows are sorted topmost first
     for (const w of this.init.windows) {
@@ -207,6 +274,7 @@ class Overlay {
     const c = this.canvas;
     c.addEventListener("mousemove", (e) => this.onMove(e));
     c.addEventListener("mousedown", (e) => this.onDown(e));
+    c.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
     window.addEventListener("mouseup", (e) => this.onUp(e));
     c.addEventListener("mouseenter", () => {
       if (!this.dragStart) void win.setFocus();
@@ -248,6 +316,7 @@ class Overlay {
       this.broadcast();
     } else if (this.init.mode !== "color") {
       this.hoverWindow = this.windowAt(global);
+      this.queueElementQuery(global);
     }
     this.schedule();
   }
@@ -275,8 +344,10 @@ class Overlay {
     const sel = rectRound(rectFromPoints(start.x, start.y, end.x, end.y));
     this.broadcast(null);
     if (sel.width < 4 || sel.height < 4) {
-      // a click: capture the window under the cursor, else the whole monitor
+      // a click: capture the highlighted part / window under the cursor, else the whole monitor
       const w = this.windowAt(global);
+      const part = w && w.id === this.hoverWindow?.id ? this.hoverRect() : null;
+      if (w && part && rectContains(part, global.x, global.y)) return this.finish(part, w.id);
       if (w) return this.finish(w.rect, w.id);
       if (this.init.mode === "region" || this.init.mode === "window") return this.finish(this.monitorRect());
       this.selection = null;
@@ -299,7 +370,7 @@ class Overlay {
         if (this.selection && this.selection.width >= 4 && this.selection.height >= 4) {
           void this.finish(this.selection);
         } else if (this.hoverWindow) {
-          void this.finish(this.hoverWindow.rect, this.hoverWindow.id);
+          void this.finish(this.hoverRect() ?? this.hoverWindow.rect, this.hoverWindow.id);
         } else if (this.init.mode !== "color") {
           void this.finish(this.monitorRect());
         }
@@ -402,7 +473,7 @@ class Overlay {
   }
 
   private activeRect(): Rect | null {
-    return this.selection ?? this.remoteSelection ?? this.hoverWindow?.rect ?? null;
+    return this.selection ?? this.remoteSelection ?? this.hoverRect();
   }
 
   /** Where the highlight is drawn: glides between hovered windows, follows drags exactly. */
@@ -461,7 +532,9 @@ class Overlay {
         this.drawLabel(`${active.width} × ${active.height}`, vis.x, vis.y - 8 * dpr, vis);
         if (this.hoverWindow && !this.selection) {
           const t = this.hoverWindow.title || this.hoverWindow.appName;
-          if (t) this.drawLabel(t.slice(0, 80), vis.x, vis.y + vis.height + 30 * dpr, vis, true);
+          const part = this.chain && this.level > 0;
+          const text = part ? `Part of ${t || "window"} · scroll: bigger/smaller` : t;
+          if (text) this.drawLabel(text.slice(0, 90), vis.x, vis.y + vis.height + 30 * dpr, vis, true);
         }
       }
     }
@@ -630,7 +703,7 @@ class Overlay {
   private drawMagnifier(p: Point) {
     const { ctx, canvas, dpr } = this;
     const zoom = 8;
-    const grid = 15; // source pixels per side
+    const grid = 17; // source pixels per side (odd, so one pixel sits in the centre)
     const size = grid * zoom * dpr;
     const half = Math.floor(grid / 2);
     let x = p.x + 24 * dpr;
@@ -678,13 +751,18 @@ class Overlay {
     const [r, g, b] = this.pixelAt(p);
     const gx = Math.floor(p.x) + this.init.monitor.x;
     const gy = Math.floor(p.y) + this.init.monitor.y;
-    ctx.fillStyle = this.chrome.fg;
-    ctx.font = `${11 * dpr}px ${this.chrome.font}`;
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${rgbToHex(r, g, b)}   ${gx}, ${gy}`, x + 8 * dpr, y + size + labelH / 2);
+    // swatch first, then "#rrggbb  x, y" so the text never runs under it
+    const sw = labelH - 12 * dpr;
     ctx.fillStyle = rgbToHex(r, g, b);
-    this.roundRect(x + size - 22 * dpr, y + size + 5 * dpr, 16 * dpr, labelH - 10 * dpr, 3 * dpr);
+    this.roundRect(x + 7 * dpr, y + size + 6 * dpr, sw, sw, 3 * dpr);
     ctx.fill();
+    ctx.strokeStyle = this.chrome.border;
+    ctx.lineWidth = dpr;
+    ctx.stroke();
+    ctx.fillStyle = this.chrome.fg;
+    ctx.font = `${10.5 * dpr}px ${this.chrome.font}`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${rgbToHex(r, g, b)}  ${gx}, ${gy}`, x + 7 * dpr + sw + 6 * dpr, y + size + labelH / 2);
     ctx.restore();
 
     this.roundRect(x + 0.5, y + 0.5, size - 1, size + labelH - 1, radius);

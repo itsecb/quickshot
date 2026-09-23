@@ -202,7 +202,10 @@ pub fn open_editor(app: &AppHandle, capture: &Capture) -> AppResult<()> {
     let (img_w, img_h) = capture.image.dimensions();
     let (scale, work) = monitor_at(app, capture.source.rect.x, capture.source.rect.y);
     // Chrome: toolbar + status bar; keep the whole window inside 90% of the work area.
-    let (chrome_w, chrome_h) = (48.0, 112.0);
+    // Chrome: toolbar + properties bar + status bar. Small screenshots still get a roomy
+    // window (the image sits centred) so the two toolbar rows never have to squeeze.
+    let (chrome_w, chrome_h) = (48.0, 150.0);
+    let (min_w, min_h): (f64, f64) = (1000.0, 560.0);
     let (max_w, max_h) = work
         .map(|w| {
             (
@@ -211,8 +214,10 @@ pub fn open_editor(app: &AppHandle, capture: &Capture) -> AppResult<()> {
             )
         })
         .unwrap_or((1600.0, 1000.0));
-    let want_w = (img_w as f64 / scale + chrome_w).clamp(720.0, max_w.max(720.0));
-    let want_h = (img_h as f64 / scale + chrome_h).clamp(480.0, max_h.max(480.0));
+    // never below the minimum, never beyond the screen (on screens smaller than the minimum,
+    // the screen wins)
+    let want_w = (img_w as f64 / scale + chrome_w).clamp(min_w.min(max_w), max_w);
+    let want_h = (img_h as f64 / scale + chrome_h).clamp(min_h.min(max_h), max_h);
 
     let title = if capture.source.title.is_empty() {
         format!("QuickShot — {}×{}", img_w, img_h)
@@ -222,7 +227,7 @@ pub fn open_editor(app: &AppHandle, capture: &Capture) -> AppResult<()> {
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor.html".into()))
         .title(title)
         .inner_size(want_w, want_h)
-        .min_inner_size(640.0, 440.0)
+        .min_inner_size(880.0, 480.0) // below this the toolbar can't fit even icon-only
         .visible(false)
         .build()?;
     if let Some(w) = work {

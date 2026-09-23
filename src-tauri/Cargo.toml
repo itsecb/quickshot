@@ -1,6 +1,6 @@
 [package]
 name = "quickshot"
-version = "0.6.0"
+version = "0.6.1"
 description = "Fast, lightweight screenshot capture, markup and guide builder"
 authors = ["ecbrown75"]
 edition = "2021"
@@ -61,6 +61,8 @@ windows = { version = "0.62", features = [
   "Win32_System_Console",
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Accessibility",
+  "Win32_System_Com",
 ] }
 
 [target.'cfg(not(windows))'.dependencies]

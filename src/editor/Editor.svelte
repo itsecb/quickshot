@@ -597,56 +597,6 @@
         {/each}
       </div>
 
-      <div class="group">
-        {#each palette as c, i (i)}
-          <button
-            class="swatch"
-            class:active={style.stroke.toLowerCase() === c.toLowerCase()}
-            style={`background:${c}`}
-            title={`${c} (${i + 1})`}
-            onclick={() => setColor(c)}
-          >
-            <span class="key">{i + 1}</span>
-          </button>
-        {/each}
-        <input type="color" bind:value={style.stroke} onchange={applyStyle} title="Custom colour" style="width:26px;height:24px;padding:0;border:0;background:transparent" />
-      </div>
-
-      <div class="group">
-        {#if WIDTH_TOOLS.has(tool) || (tool === "select" && selectedId)}
-        <label class="width" title="Stroke width, remembered per tool ( [ and ] )">
-          <span class="muted">Width</span>
-          <input type="range" min="1" max="30" value={style.strokeWidth} oninput={(e) => setWidth(+e.currentTarget.value)} />
-          <span style="width:2ch">{style.strokeWidth}</span>
-        </label>
-        {/if}
-        {#if tool === "text" || selectedId}
-          <label class="width" title="Font size">
-            <span class="muted">Text</span>
-            <input type="range" min="10" max="96" bind:value={style.fontSize} onchange={applyStyle} />
-          </label>
-        {/if}
-        {#if tool === "blur"}
-          <select class="select-sm" bind:value={style.blurMode} onchange={applyStyle} title="Blur mode">
-            <option value="pixelate">Pixelate</option>
-            <option value="blur">Blur</option>
-          </select>
-          <input type="range" min="4" max="40" bind:value={style.blurAmount} onchange={applyStyle} title="Strength" style="width:60px" />
-        {/if}
-        {#if tool === "rect" || tool === "ellipse"}
-          <label class="width"><input type="checkbox" bind:checked={style.fill} onchange={applyStyle} /> Fill</label>
-        {/if}
-        <label class="width" title="Drop shadow"><input type="checkbox" bind:checked={style.shadow} onchange={applyStyle} /> Shadow</label>
-      </div>
-
-      <div class="group">
-        <button class="tool" onclick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">{@html icon("undo")}</button>
-        <button class="tool" onclick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">{@html icon("redo")}</button>
-        {#if hasCrop}
-          <button class="action" onclick={() => stage?.clearCrop()} title="Remove crop">{@html icon("clear")} Uncrop</button>
-        {/if}
-      </div>
-
       <div class="group right" aria-label="Enhance">
         <button class="tool" onclick={doRedact} title="Redact: pixelate IPs, emails, hostnames, secrets… (Ctrl+Shift+X)">{@html icon("redact")}</button>
         <div class="popover-anchor">
@@ -700,9 +650,64 @@
       </div>
 
       <div class="group main-actions">
-        <button class="action" onclick={doSave} title="Save to folder (Ctrl+S) · Save as (Ctrl+Shift+S)">{@html icon("save")} Save</button>
-        <button class="action primary" onclick={doCopy} title="Copy to clipboard (Ctrl+C)">{@html icon("copy")} Copy</button>
+        <button class="action" onclick={doSave} title="Save to folder (Ctrl+S) · Save as (Ctrl+Shift+S)">{@html icon("save")}<span class="label">Save</span></button>
+        <button class="action primary" onclick={doCopy} title="Copy to clipboard (Ctrl+C)">{@html icon("copy")}<span class="label">Copy</span></button>
       </div>
+    </div>
+
+    <div class="propbar">
+      <span class="tool-name">{TOOLS.find((t) => t.id === tool)?.label ?? ""}</span>
+      <div class="group">
+        {#each palette as c, i (i)}
+          <button
+            class="swatch"
+            class:active={style.stroke.toLowerCase() === c.toLowerCase()}
+            style={`background:${c}`}
+            title={`${c} (${i + 1})`}
+            onclick={() => setColor(c)}
+          >
+            <span class="key">{i + 1}</span>
+          </button>
+        {/each}
+        <input type="color" bind:value={style.stroke} onchange={applyStyle} title="Custom colour" style="width:26px;height:24px;padding:0;border:0;background:transparent" />
+      </div>
+
+      <div class="group">
+        {#if WIDTH_TOOLS.has(tool) || (tool === "select" && selectedId)}
+        <label class="width" title="Stroke width, remembered per tool ( [ and ] )">
+          <span class="muted">Width</span>
+          <input type="range" min="1" max="30" value={style.strokeWidth} oninput={(e) => setWidth(+e.currentTarget.value)} />
+          <span style="width:2ch">{style.strokeWidth}</span>
+        </label>
+        {/if}
+        {#if tool === "text" || selectedId}
+          <label class="width" title="Font size">
+            <span class="muted">Text</span>
+            <input type="range" min="10" max="96" bind:value={style.fontSize} onchange={applyStyle} />
+          </label>
+        {/if}
+        {#if tool === "blur"}
+          <select class="select-sm" bind:value={style.blurMode} onchange={applyStyle} title="Blur mode">
+            <option value="pixelate">Pixelate</option>
+            <option value="blur">Blur</option>
+          </select>
+          <input type="range" min="4" max="40" bind:value={style.blurAmount} onchange={applyStyle} title="Strength" style="width:60px" />
+        {/if}
+        {#if tool === "rect" || tool === "ellipse"}
+          <label class="width"><input type="checkbox" bind:checked={style.fill} onchange={applyStyle} /> Fill</label>
+        {/if}
+        <label class="width" title="Drop shadow"><input type="checkbox" bind:checked={style.shadow} onchange={applyStyle} /> Shadow</label>
+      </div>
+
+      <span class="spacer"></span>
+      <div class="group">
+        <button class="tool" onclick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">{@html icon("undo")}</button>
+        <button class="tool" onclick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">{@html icon("redo")}</button>
+        {#if hasCrop}
+          <button class="action" onclick={() => stage?.clearCrop()} title="Remove crop">{@html icon("clear")} Uncrop</button>
+        {/if}
+      </div>
+
     </div>
 
     <div class="canvas-host" bind:this={host}></div>

@@ -36,6 +36,9 @@ export const overlayReady = (label: string) => invoke<void>("overlay_ready", { l
 export const finishCapture = (rect: Rect, windowId?: number) =>
   invoke<number>("finish_capture", { rect, windowId: windowId ?? null });
 export const cancelCapture = () => invoke<void>("cancel_capture");
+/** Nested UI element rects under a point in a window, outermost first (Windows; else empty). */
+export const elementChain = (windowId: number, x: number, y: number) =>
+  invoke<Rect[]>("element_chain", { windowId, x: Math.round(x), y: Math.round(y) });
 export const triggerCapture = (mode: CaptureMode, delay?: number) =>
   invoke<void>("trigger_capture", { mode, delay: delay ?? null });
 

@@ -19,6 +19,7 @@ mod settings;
 mod state;
 mod ticket;
 mod tray;
+mod uia;
 mod windows;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
@@ -165,6 +166,7 @@ pub fn run() {
             commands::capture::cancel_capture,
             commands::capture::trigger_capture,
             commands::capture::cancel_countdown,
+            commands::capture::element_chain,
             commands::output::editor_init,
             commands::output::release_capture,
             commands::output::copy_image,

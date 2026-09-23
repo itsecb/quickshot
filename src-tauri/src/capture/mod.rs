@@ -88,22 +88,40 @@ pub fn capture_all_monitors() -> AppResult<Vec<CaptureFrame>> {
 }
 
 /// Visible top-level windows in physical pixels, topmost first.
-/// Windows that can't be what the user means when they click: click-through overlays
-/// (GeForce/Game Bar, meeting share borders), fully transparent layered windows, and floating
-/// tool windows other than the taskbar. Left in, they sit on top of everything and make
-/// every hover/click pick "the whole screen".
+/// Extended style, layered alpha and class of a top-level window (Windows only).
+struct WinStyle {
+    ex_style: u32,
+    layered_alpha: Option<u8>,
+    class: String,
+}
+
+/// Why a window can't be what the user means when they point at it, if so. Left in, these sit
+/// on top of everything and make every hover/click pick "the whole screen":
+/// click-through overlays (GeForce/Game Bar, share borders, PowerToys), fully transparent
+/// layered windows, floating tool windows (the taskbar excepted), and always-on-top windows
+/// covering a whole monitor (real apps are practically never both).
 #[cfg_attr(not(windows), allow(dead_code))]
-fn overlay_like(ex_style: u32, layered_alpha: Option<u8>, class: &str) -> bool {
+fn skip_reason(style: &WinStyle, covers_monitor: bool) -> Option<&'static str> {
+    const WS_EX_TOPMOST: u32 = 0x8;
     const WS_EX_TRANSPARENT: u32 = 0x20;
     const WS_EX_TOOLWINDOW: u32 = 0x80;
     const WS_EX_LAYERED: u32 = 0x8_0000;
-    ex_style & WS_EX_TRANSPARENT != 0
-        || (ex_style & WS_EX_LAYERED != 0 && layered_alpha == Some(0))
-        || (ex_style & WS_EX_TOOLWINDOW != 0 && !class.starts_with("Shell_"))
+    let ex = style.ex_style;
+    if ex & WS_EX_TRANSPARENT != 0 {
+        Some("click-through")
+    } else if ex & WS_EX_LAYERED != 0 && style.layered_alpha == Some(0) {
+        Some("invisible")
+    } else if ex & WS_EX_TOOLWINDOW != 0 && !style.class.starts_with("Shell_") {
+        Some("tool window")
+    } else if ex & WS_EX_TOPMOST != 0 && covers_monitor && !style.class.starts_with("Shell_") {
+        Some("full-screen always-on-top overlay")
+    } else {
+        None
+    }
 }
 
 #[cfg(windows)]
-fn is_overlay_window(id: u32) -> bool {
+fn window_style(id: u32) -> Option<WinStyle> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
         GetClassNameW, GetLayeredWindowAttributes, GetWindowLongPtrW, GWL_EXSTYLE,
@@ -127,20 +145,32 @@ fn is_overlay_window(id: u32) -> bool {
         };
         let mut buf = [0u16; 128];
         let len = GetClassNameW(hwnd, &mut buf).max(0) as usize;
-        overlay_like(
+        Some(WinStyle {
             ex_style,
             layered_alpha,
-            &String::from_utf16_lossy(&buf[..len]),
-        )
+            class: String::from_utf16_lossy(&buf[..len]),
+        })
     }
 }
 
 #[cfg(not(windows))]
-fn is_overlay_window(_id: u32) -> bool {
-    false
+fn window_style(_id: u32) -> Option<WinStyle> {
+    None
 }
 
-pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
+/// Does `rect` cover (almost) all of one monitor?
+fn covers_a_monitor(rect: &Rect, frames: &[CaptureFrame]) -> bool {
+    frames.iter().any(|f| {
+        let m = f.monitor.rect();
+        rect.intersect(&m).is_some_and(|i| {
+            i.width as u64 * i.height as u64 * 100 >= m.width as u64 * m.height as u64 * 95
+        })
+    })
+}
+
+/// Capturable top-level windows, topmost first. `verbose` logs every candidate and every
+/// skipped window with the reason (window mode), so a log shows what detection saw.
+pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
     let windows = match xcap::Window::all() {
         Ok(w) => w,
         Err(e) => {
@@ -155,7 +185,7 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
     let mut out = Vec::new();
     for (index, w) in windows.into_iter().enumerate() {
         let id = w.id().unwrap_or(0);
-        if w.is_minimized().unwrap_or(false) || is_overlay_window(id) {
+        if w.is_minimized().unwrap_or(false) {
             continue;
         }
         let (Ok(x), Ok(y), Ok(width), Ok(height)) = (w.x(), w.y(), w.width(), w.height()) else {
@@ -202,6 +232,18 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
         if rect.intersect(&screen).is_none() {
             continue;
         }
+        if let Some(style) = window_style(id) {
+            if let Some(reason) = skip_reason(&style, covers_a_monitor(&rect, frames)) {
+                if verbose {
+                    log::info!(
+                        "window skipped ({reason}): {title:?} app={app_name:?} class={:?} ex=0x{:x} rect={rect:?}",
+                        style.class,
+                        style.ex_style
+                    );
+                }
+                continue;
+            }
+        }
         // On Windows xcap lists windows top-most first (EnumWindows order), so the position is
         // the z-order; w.z() would re-enumerate every window for each call.
         let z = if cfg!(windows) {
@@ -218,6 +260,17 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
         });
     }
     out.sort_by_key(|w| std::cmp::Reverse(w.z));
+    if verbose {
+        for w in &out {
+            log::info!(
+                "window candidate z={} {:?} app={:?} rect={:?}",
+                w.z,
+                w.title,
+                w.app_name,
+                w.rect
+            );
+        }
+    }
     out
 }
 
@@ -394,7 +447,10 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 ..Default::default()
             };
             let rect = source.rect;
-            fill_app(&mut source, window_at_center(&list_windows(&frames), rect));
+            fill_app(
+                &mut source,
+                window_at_center(&list_windows(&frames, false), rect),
+            );
             let capture = state.insert_capture(app, frame.image.clone(), source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
         }
@@ -410,7 +466,10 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
                 rect,
                 ..Default::default()
             };
-            fill_app(&mut source, window_at_center(&list_windows(&frames), rect));
+            fill_app(
+                &mut source,
+                window_at_center(&list_windows(&frames, false), rect),
+            );
             let capture = state.insert_capture(app, image, source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
         }
@@ -420,19 +479,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
 
 fn begin_overlay(app: &AppHandle, mode: CaptureMode, frames: Vec<CaptureFrame>) -> AppResult<()> {
     let state = app.state::<AppState>();
-    let windows = list_windows(&frames);
-    if mode == CaptureMode::Window {
-        // one line per candidate, so a log shows exactly what window mode could pick
-        for w in &windows {
-            log::info!(
-                "window candidate z={} {:?} app={:?} rect={:?}",
-                w.z,
-                w.title,
-                w.app_name,
-                w.rect
-            );
-        }
-    }
+    let windows = list_windows(&frames, mode == CaptureMode::Window);
     let monitors: Vec<MonitorInfo> = frames.iter().map(|f| f.monitor.clone()).collect();
     let labels: Vec<String> = monitors.iter().map(|m| overlay::label_for(m.id)).collect();
     let session = CaptureSession {
@@ -582,16 +629,27 @@ mod tests {
         }
     }
 
+    fn style(ex_style: u32, layered_alpha: Option<u8>, class: &str) -> WinStyle {
+        WinStyle {
+            ex_style,
+            layered_alpha,
+            class: class.into(),
+        }
+    }
+
     #[test]
     fn overlay_windows_are_not_pickable() {
         // click-through overlay, invisible layered window, floating tool window
-        assert!(overlay_like(0x20 | 0x8, None, "NVOverlay"));
-        assert!(overlay_like(0x8_0000, Some(0), "CEF-OSC-WIDGET"));
-        assert!(overlay_like(0x80, None, "Chrome_WidgetWin_1"));
-        // normal windows, translucent-but-visible layered windows, the taskbar
-        assert!(!overlay_like(0x100, None, "Chrome_WidgetWin_1"));
-        assert!(!overlay_like(0x8_0000, Some(230), "ConsoleWindowClass"));
-        assert!(!overlay_like(0x80, None, "Shell_TrayWnd"));
+        assert!(skip_reason(&style(0x20 | 0x8, None, "NVOverlay"), true).is_some());
+        assert!(skip_reason(&style(0x8_0000, Some(0), "CEF-OSC-WIDGET"), false).is_some());
+        assert!(skip_reason(&style(0x80, None, "Chrome_WidgetWin_1"), false).is_some());
+        // always-on-top and covering a whole monitor: an overlay, not an app
+        assert!(skip_reason(&style(0x8, None, "Chrome_WidgetWin_1"), true).is_some());
+        // normal windows (maximized ones too), always-on-top small windows, the taskbar
+        assert!(skip_reason(&style(0x100, None, "Chrome_WidgetWin_1"), true).is_none());
+        assert!(skip_reason(&style(0x8, None, "Notepad"), false).is_none());
+        assert!(skip_reason(&style(0x8_0000, Some(230), "ConsoleWindowClass"), false).is_none());
+        assert!(skip_reason(&style(0x80 | 0x8, None, "Shell_TrayWnd"), false).is_none());
     }
 
     #[test]

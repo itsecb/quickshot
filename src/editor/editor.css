@@ -1,9 +1,11 @@
 .editor {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   height: 100vh;
 }
 
+/* Row 1: tools on the left, actions on the right. Never wraps: it is sized for the editor's
+   minimum width, and labels drop to icons (container query) before anything overflows. */
 .toolbar {
   display: flex;
   align-items: center;
@@ -11,7 +13,50 @@
   padding: 6px 8px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  container-type: inline-size;
+  overflow: hidden;
+}
+
+/* Row 2: properties of the current tool / selection, then undo/redo at the right */
+.propbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 3px 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.propbar .tool-name {
+  min-width: 92px;
+  padding: 0 6px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.propbar .spacer {
+  flex: 1;
+}
+
+.propbar .group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.propbar .tool {
+  width: 30px;
+  height: 28px;
 }
 
 .toolbar .group {
@@ -32,8 +77,6 @@
 /* everything from here on sits at the right edge */
 .toolbar .group.right {
   margin-left: auto;
-  padding-left: 8px;
-  border-left: 1px solid var(--border);
 }
 
 .toolbar .main-actions {
@@ -288,4 +331,21 @@
 
 .bg-swatch.active {
   border-color: var(--fg);
+}
+
+/* narrow editor: Save/Copy become icon buttons instead of wrapping the toolbar */
+@container (max-width: 940px) {
+  .main-actions .label {
+    display: none;
+  }
+}
+
+/* colour shortcuts (1-9) only when you're looking at the palette */
+.swatch .key {
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+}
+
+.propbar:hover .swatch .key {
+  opacity: 1;
 }

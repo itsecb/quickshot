@@ -7,7 +7,9 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 
 * **Capture**: region, window (click), full screen, repeat last region. Multi-monitor and mixed DPI aware.
   Frozen-frame overlay with crosshair, magnifier, pixel colour and coordinates, an animated border that
-  glides between windows as you hover, and edges that snap to windows while you drag (hold `Alt` to
+  glides between windows as you hover, Snagit-style detection of the parts inside windows (panels,
+  toolbars, dialogs, buttons; scroll the wheel for a bigger or smaller part), and edges that snap to
+  windows while you drag (hold `Alt` to
   disable). Optional shutter sound.
 * **Floating thumbnail** after a copy or save: Edit, Pin, Copy again, or drag it straight into a chat.
 * **Markup editor** with Shottr-style single-key tools:

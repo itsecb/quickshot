@@ -71,3 +71,10 @@ pub fn cancel_countdown(state: State<'_, AppState>) {
         .countdown_cancel
         .store(true, std::sync::atomic::Ordering::SeqCst);
 }
+
+/// Nested UI elements under a point inside a window (outermost first), for Snagit-style
+/// element highlighting in the overlay. Empty where unsupported.
+#[tauri::command(async)]
+pub fn element_chain(window_id: u32, x: i32, y: i32) -> Vec<Rect> {
+    crate::uia::element_chain(window_id, x, y)
+}
