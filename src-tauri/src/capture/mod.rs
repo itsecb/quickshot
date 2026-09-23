@@ -1,6 +1,6 @@
 pub mod monitors;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -88,6 +88,58 @@ pub fn capture_all_monitors() -> AppResult<Vec<CaptureFrame>> {
 }
 
 /// Visible top-level windows in physical pixels, topmost first.
+/// Windows that can't be what the user means when they click: click-through overlays
+/// (GeForce/Game Bar, meeting share borders), fully transparent layered windows, and floating
+/// tool windows other than the taskbar. Left in, they sit on top of everything and make
+/// every hover/click pick "the whole screen".
+#[cfg_attr(not(windows), allow(dead_code))]
+fn overlay_like(ex_style: u32, layered_alpha: Option<u8>, class: &str) -> bool {
+    const WS_EX_TRANSPARENT: u32 = 0x20;
+    const WS_EX_TOOLWINDOW: u32 = 0x80;
+    const WS_EX_LAYERED: u32 = 0x8_0000;
+    ex_style & WS_EX_TRANSPARENT != 0
+        || (ex_style & WS_EX_LAYERED != 0 && layered_alpha == Some(0))
+        || (ex_style & WS_EX_TOOLWINDOW != 0 && !class.starts_with("Shell_"))
+}
+
+#[cfg(windows)]
+fn is_overlay_window(id: u32) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetLayeredWindowAttributes, GetWindowLongPtrW, GWL_EXSTYLE,
+        LAYERED_WINDOW_ATTRIBUTES_FLAGS, LWA_ALPHA,
+    };
+    // xcap ids are HWNDs truncated to 32 bits; HWNDs are sign-extended 32-bit values.
+    let hwnd = HWND(id as i32 as isize as *mut core::ffi::c_void);
+    // SAFETY: read-only queries on a window handle; a stale handle just returns zeros/errors.
+    unsafe {
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let mut alpha = 255u8;
+        let mut flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS(0);
+        let layered_alpha = match GetLayeredWindowAttributes(
+            hwnd,
+            None,
+            Some(&mut alpha as *mut u8),
+            Some(&mut flags as *mut LAYERED_WINDOW_ATTRIBUTES_FLAGS),
+        ) {
+            Ok(()) if flags.0 & LWA_ALPHA.0 != 0 => Some(alpha),
+            _ => None,
+        };
+        let mut buf = [0u16; 128];
+        let len = GetClassNameW(hwnd, &mut buf).max(0) as usize;
+        overlay_like(
+            ex_style,
+            layered_alpha,
+            &String::from_utf16_lossy(&buf[..len]),
+        )
+    }
+}
+
+#[cfg(not(windows))]
+fn is_overlay_window(_id: u32) -> bool {
+    false
+}
+
 pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
     let windows = match xcap::Window::all() {
         Ok(w) => w,
@@ -97,9 +149,13 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
         }
     };
     let screen = Rect::union_all(frames.iter().map(|f| f.monitor.rect())).unwrap_or_default();
+    let count = windows.len() as i32;
+    // looking up an app name opens the process; many windows share one
+    let mut app_names: HashMap<u32, String> = HashMap::new();
     let mut out = Vec::new();
-    for w in windows {
-        if w.is_minimized().unwrap_or(false) {
+    for (index, w) in windows.into_iter().enumerate() {
+        let id = w.id().unwrap_or(0);
+        if w.is_minimized().unwrap_or(false) || is_overlay_window(id) {
             continue;
         }
         let (Ok(x), Ok(y), Ok(width), Ok(height)) = (w.x(), w.y(), w.width(), w.height()) else {
@@ -108,7 +164,13 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
         if width < 20 || height < 20 {
             continue;
         }
-        let app_name = w.app_name().unwrap_or_default();
+        let app_name = match w.pid() {
+            Ok(pid) => app_names
+                .entry(pid)
+                .or_insert_with(|| w.app_name().unwrap_or_default())
+                .clone(),
+            Err(_) => w.app_name().unwrap_or_default(),
+        };
         let title = w.title().unwrap_or_default();
         if OWN_APP_NAMES
             .iter()
@@ -140,12 +202,19 @@ pub fn list_windows(frames: &[CaptureFrame]) -> Vec<WindowInfo> {
         if rect.intersect(&screen).is_none() {
             continue;
         }
+        // On Windows xcap lists windows top-most first (EnumWindows order), so the position is
+        // the z-order; w.z() would re-enumerate every window for each call.
+        let z = if cfg!(windows) {
+            count - index as i32
+        } else {
+            w.z().unwrap_or(0)
+        };
         out.push(WindowInfo {
-            id: w.id().unwrap_or(0),
+            id,
             title,
             app_name,
             rect,
-            z: w.z().unwrap_or(0),
+            z,
         });
     }
     out.sort_by_key(|w| std::cmp::Reverse(w.z));
@@ -320,6 +389,18 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
 fn begin_overlay(app: &AppHandle, mode: CaptureMode, frames: Vec<CaptureFrame>) -> AppResult<()> {
     let state = app.state::<AppState>();
     let windows = list_windows(&frames);
+    if mode == CaptureMode::Window {
+        // one line per candidate, so a log shows exactly what window mode could pick
+        for w in &windows {
+            log::info!(
+                "window candidate z={} {:?} app={:?} rect={:?}",
+                w.z,
+                w.title,
+                w.app_name,
+                w.rect
+            );
+        }
+    }
     let monitors: Vec<MonitorInfo> = frames.iter().map(|f| f.monitor.clone()).collect();
     let labels: Vec<String> = monitors.iter().map(|m| overlay::label_for(m.id)).collect();
     let session = CaptureSession {
@@ -467,6 +548,18 @@ mod tests {
             rect,
             z: 0,
         }
+    }
+
+    #[test]
+    fn overlay_windows_are_not_pickable() {
+        // click-through overlay, invisible layered window, floating tool window
+        assert!(overlay_like(0x20 | 0x8, None, "NVOverlay"));
+        assert!(overlay_like(0x8_0000, Some(0), "CEF-OSC-WIDGET"));
+        assert!(overlay_like(0x80, None, "Chrome_WidgetWin_1"));
+        // normal windows, translucent-but-visible layered windows, the taskbar
+        assert!(!overlay_like(0x100, None, "Chrome_WidgetWin_1"));
+        assert!(!overlay_like(0x8_0000, Some(230), "ConsoleWindowClass"));
+        assert!(!overlay_like(0x80, None, "Shell_TrayWnd"));
     }
 
     #[test]

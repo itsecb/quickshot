@@ -305,10 +305,12 @@ class Overlay {
       const vis = rectIntersect(l, { x: 0, y: 0, width: W, height: H });
       if (vis) {
         ctx.drawImage(this.frame, vis.x, vis.y, vis.width, vis.height, vis.x, vis.y, vis.width, vis.height);
-        ctx.lineWidth = 1.5 * dpr;
-        ctx.strokeStyle = this.selection || this.remoteSelection ? "#4c8dff" : "#ffcc00";
+        const selecting = !!(this.selection || this.remoteSelection);
+        ctx.lineWidth = (selecting ? 2 : 1.5) * dpr;
+        ctx.strokeStyle = selecting ? "#4c8dff" : "#ffcc00";
         ctx.setLineDash([]);
         ctx.strokeRect(vis.x + 0.5, vis.y + 0.5, vis.width - 1, vis.height - 1);
+        if (selecting) this.drawCorners(vis);
         this.drawLabel(`${active.width} × ${active.height}`, vis.x, vis.y - 8 * dpr, vis);
         if (this.hoverWindow && !this.selection) {
           const t = this.hoverWindow.title || this.hoverWindow.appName;
@@ -328,7 +330,9 @@ class Overlay {
     }
 
     if (this.cursor && !this.finished) {
-      this.drawCrosshair(this.cursor);
+      // While dragging, the cursor sits on the frame's corner: full-screen crosshair lines
+      // would run along (and hide) its right and bottom edges, so the frame alone guides.
+      if (!this.dragStart) this.drawCrosshair(this.cursor);
       if (this.init.showMagnifier || this.init.mode === "color") this.drawMagnifier(this.cursor);
     }
 
@@ -351,6 +355,24 @@ class Overlay {
     ctx.fillStyle = "#fff";
     ctx.textBaseline = "middle";
     ctx.fillText(text, bx + padX, by + h / 2);
+  }
+
+  /** Small square handles on the selection's corners, so the frame reads as a whole box. */
+  private drawCorners(r: Rect) {
+    const { ctx, dpr } = this;
+    const size = 6 * dpr;
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#4c8dff";
+    ctx.lineWidth = 1.5 * dpr;
+    for (const [x, y] of [
+      [r.x, r.y],
+      [r.x + r.width, r.y],
+      [r.x, r.y + r.height],
+      [r.x + r.width, r.y + r.height],
+    ] as const) {
+      ctx.fillRect(x - size / 2, y - size / 2, size, size);
+      ctx.strokeRect(x - size / 2, y - size / 2, size, size);
+    }
   }
 
   private drawCrosshair(p: Point) {
