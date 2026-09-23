@@ -2,7 +2,7 @@
 // drag a region, click a window or a pixel, and hands the result to Rust.
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { cancelCapture, copyText, elementChain, finishCapture, overlayInit, overlayReady } from "$lib/ipc";
+import { cancelCapture, copyText, elementChain, finishCapture, overlayIdle, overlayInit, overlayReady } from "$lib/ipc";
 import { fetchRawToCanvas } from "$lib/image";
 import { rectContains, rectEdges, rectEquals, rectFromPoints, rectIntersect, rectRound, snapPoint, type Edge } from "$lib/geometry";
 import { rgbToHex } from "$lib/image";
@@ -105,6 +105,9 @@ class Overlay {
   private raf = 0;
   private looping = false;
   private unlisten: UnlistenFn[] = [];
+  /** Removes every listener this overlay added to the (reused) page. */
+  private ac = new AbortController();
+  private disposed = false;
   private lastEmit = 0;
   private hint = "";
   // animation state
@@ -135,10 +138,20 @@ class Overlay {
     this.chrome = chromeColors(); // stylesheets are applied by now
     this.init = await overlayInit(label);
     this.frame = await fetchRawToCanvas(this.init.monitor.frameUrl);
+    if (this.disposed) return;
     this.frameCtx = this.frame.getContext("2d", { willReadFrequently: true })!;
     const { width, height } = this.frame;
     this.canvas.width = width;
     this.canvas.height = height;
+    // One canvas pixel per screen pixel, or the frozen screen looks soft. At fractional
+    // scaling (125%, 150%) "100vw" rounds to whole CSS pixels and the canvas gets resampled;
+    // an exact CSS size avoids that (and pixelated scaling keeps any remaining fraction sharp).
+    const ratio = window.devicePixelRatio || 1;
+    const [cssW, cssH] = [width / ratio, height / ratio];
+    if (Math.abs(cssW - window.innerWidth) <= 2 && Math.abs(cssH - window.innerHeight) <= 2) {
+      this.canvas.style.width = `${cssW}px`;
+      this.canvas.style.height = `${cssH}px`;
+    }
     this.clean = document.createElement("canvas");
     this.clean.width = width;
     this.clean.height = height;
@@ -158,6 +171,7 @@ class Overlay {
     this.hint = this.hintText();
     this.render(); // undimmed first frame: identical to the live screen when shown
     this.bind();
+    if (this.disposed) return;
     await overlayReady(label);
     this.fadeStart = performance.now();
     this.schedule();
@@ -292,10 +306,11 @@ class Overlay {
   // ---- events ----
   private bind() {
     const c = this.canvas;
-    c.addEventListener("mousemove", (e) => this.onMove(e));
+    const signal = this.ac.signal;
+    c.addEventListener("mousemove", (e) => this.onMove(e), { signal });
     c.addEventListener("mousedown", (e) => this.onDown(e));
     c.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
-    window.addEventListener("mouseup", (e) => this.onUp(e));
+    window.addEventListener("mouseup", (e) => this.onUp(e), { signal });
     c.addEventListener("mouseenter", () => {
       if (!this.dragStart) void win.setFocus();
     });
@@ -310,19 +325,23 @@ class Overlay {
       e.preventDefault();
       void this.cancel();
     });
-    window.addEventListener("keydown", (e) => this.onKey(e));
-    window.addEventListener("blur", () => {
-      // keyboard focus moved to another overlay; keep our visuals but drop hover
-      if (!this.dragStart) {
-        this.hoverWindow = null;
-        this.schedule();
-      }
-    });
+    window.addEventListener("keydown", (e) => this.onKey(e), { signal });
+    window.addEventListener(
+      "blur",
+      () => {
+        // keyboard focus moved to another overlay; keep our visuals but drop hover
+        if (!this.dragStart) {
+          this.hoverWindow = null;
+          this.schedule();
+        }
+      },
+      { signal },
+    );
     void listen<{ from: string; rect: Rect | null }>("overlay://selection", (ev) => {
       if (ev.payload.from === label) return;
       this.remoteSelection = ev.payload.rect;
       this.schedule();
-    }).then((u) => this.unlisten.push(u));
+    }).then((u) => (this.disposed ? u() : this.unlisten.push(u)));
   }
 
   private onMove(e: MouseEvent) {
@@ -479,6 +498,23 @@ class Overlay {
     const y = Math.max(0, Math.min(this.frame.height - 1, Math.floor(p.y)));
     const d = this.frameCtx.getImageData(x, y, 1, 1).data;
     return [d[0]!, d[1]!, d[2]!];
+  }
+
+  /** Tear down before the page is reused for the next capture. */
+  dispose() {
+    this.disposed = true;
+    this.ac.abort();
+    for (const u of this.unlisten) u();
+    this.unlisten = [];
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    this.looping = false;
+    clearTimeout(this.queryTimer);
+    this.canvas.remove();
+    // full-screen bitmaps: give the memory back while the page waits hidden
+    for (const c of [this.canvas, this.frame, this.clean, this.dimmed]) {
+      if (c) c.width = c.height = 0;
+    }
   }
 
   // ---- animation loop ----
@@ -811,8 +847,35 @@ class Overlay {
   }
 }
 
-const overlay = new Overlay();
-overlay.start().catch(async (err) => {
-  console.error("overlay failed", err);
-  await cancelCapture();
+declare global {
+  interface Window {
+    /** Built ahead of the first capture: wait for a start instead of starting now. */
+    __QS_OVERLAY_WARM?: boolean;
+  }
+}
+
+// The page outlives captures: Rust keeps it loaded (hidden) and sends "start" for the next
+// one, which gets a fresh Overlay; "reset" ends the current one when the capture is over.
+let current: Overlay | null = null;
+
+function run() {
+  current?.dispose();
+  const overlay = new Overlay();
+  current = overlay;
+  overlay.start().catch(async (err) => {
+    if (overlay !== current) return; // superseded by a newer capture
+    console.error("overlay failed", err);
+    await cancelCapture();
+  });
+}
+
+function reset() {
+  current?.dispose();
+  current = null;
+  void overlayIdle(label);
+}
+
+void Promise.all([listen("overlay://start", run), listen("overlay://reset", reset)]).then(() => {
+  if (window.__QS_OVERLAY_WARM) void overlayIdle(label);
+  else run();
 });

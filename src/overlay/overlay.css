@@ -14,4 +14,6 @@ canvas {
   width: 100vw;
   height: 100vh;
   cursor: none;
+  /* never smooth the frozen screen: at fractional scaling a soft resample looks blurry */
+  image-rendering: pixelated;
 }

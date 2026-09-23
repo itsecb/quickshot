@@ -58,6 +58,12 @@ pub fn overlay_ready(app: AppHandle, label: String) -> AppResult<()> {
     capture::overlay_ready(&app, &label)
 }
 
+/// An overlay page is idle and listening for the next capture (see `overlay::open`).
+#[tauri::command]
+pub fn overlay_idle(label: String) {
+    overlay::mark_idle(&label);
+}
+
 #[tauri::command(async)]
 pub fn finish_capture(app: AppHandle, rect: Rect, window_id: Option<u32>) -> AppResult<u64> {
     capture::finish(&app, rect, window_id)

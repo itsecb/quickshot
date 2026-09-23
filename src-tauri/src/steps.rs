@@ -78,12 +78,18 @@ fn announce(app: &AppHandle) {
     let _ = app.emit(STATE_EVENT, state());
 }
 
+/// Hotkey / tray entry point. Those handlers run on the main thread, and creating the control
+/// bar from inside them deadlocks on Windows (the webview build waits on the very event loop
+/// that's busy running the handler), freezing the whole app. So do the work elsewhere.
 pub fn toggle(app: &AppHandle) {
-    if is_recording() {
-        stop(app);
-    } else if let Err(e) = start(app) {
-        crate::windows::toast(app, "Step recorder", &e.to_string());
-    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if is_recording() {
+            stop(&app);
+        } else if let Err(e) = start(&app) {
+            crate::windows::toast(&app, "Step recorder", &e.to_string());
+        }
+    });
 }
 
 pub fn start(app: &AppHandle) -> AppResult<()> {

@@ -35,6 +35,7 @@ function invokeRaw<T>(cmd: string, bytes: Uint8Array, headers: Headers = {}): Pr
 // ---- capture / overlay ----
 export const overlayInit = (label: string) => invoke<OverlayInit>("overlay_init", { label });
 export const overlayReady = (label: string) => invoke<void>("overlay_ready", { label });
+export const overlayIdle = (label: string) => invoke<void>("overlay_idle", { label });
 export const finishCapture = (rect: Rect, windowId?: number) =>
   invoke<number>("finish_capture", { rect, windowId: windowId ?? null });
 export const cancelCapture = () => invoke<void>("cancel_capture");

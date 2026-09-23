@@ -1,9 +1,13 @@
 //! One opaque, undecorated, always-on-top window per monitor showing the frozen frame.
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::capture::MonitorInfo;
 use crate::error::AppResult;
+use crate::geom::Rect;
 
 pub fn label_for(monitor_id: u32) -> String {
     format!("overlay-{monitor_id}")
@@ -13,40 +17,110 @@ pub fn monitor_id_from_label(label: &str) -> Option<u32> {
     label.strip_prefix("overlay-")?.parse().ok()
 }
 
-/// Create hidden overlay windows for every monitor. Must run on the main thread,
-/// and the caller must not hold the session lock.
+/// Overlay windows kept loaded (hidden) between captures, by label, with the monitor rect they
+/// were built for. Building a webview and loading the page is most of the time between the
+/// hotkey and a ready overlay, so after the first capture (or the warm-up at startup) a capture
+/// only has to hand the page a new frame. A label is here only while its page is idle and
+/// listening for the next start.
+static POOL: Mutex<Option<HashMap<String, Rect>>> = Mutex::new(None);
+/// Rect each overlay window was built for, whatever state its page is in.
+static BUILT: Mutex<Option<HashMap<String, Rect>>> = Mutex::new(None);
+
+pub const START_EVENT: &str = "overlay://start";
+pub const RESET_EVENT: &str = "overlay://reset";
+
+fn with<T>(
+    map: &Mutex<Option<HashMap<String, Rect>>>,
+    f: impl FnOnce(&mut HashMap<String, Rect>) -> T,
+) -> T {
+    f(map.lock().unwrap().get_or_insert_with(HashMap::new))
+}
+
+/// Make overlays ready for `monitors` and start them on the current session: reuse an idle
+/// pooled window built for the same monitor rect, otherwise build a fresh one (which starts
+/// itself once loaded). Must run on the main thread, without the session lock held.
 pub fn open(app: &AppHandle, monitors: &[MonitorInfo]) -> AppResult<()> {
+    // overlays for monitors that are gone (display unplugged or rearranged)
+    let wanted: Vec<String> = monitors.iter().map(|m| label_for(m.id)).collect();
+    for (label, w) in app.webview_windows() {
+        if label.starts_with("overlay-") && !wanted.contains(&label) {
+            forget(&label);
+            let _ = w.destroy();
+        }
+    }
     for m in monitors {
         let label = label_for(m.id);
-        if let Some(stale) = app.get_webview_window(&label) {
-            let _ = stale.destroy();
+        let reusable = with(&POOL, |p| p.remove(&label)) == Some(m.rect());
+        match app.get_webview_window(&label) {
+            Some(w) if reusable => {
+                let _ = w.emit_to(label.as_str(), START_EVENT, ());
+            }
+            existing => {
+                if let Some(stale) = existing {
+                    forget(&label);
+                    let _ = stale.destroy();
+                }
+                build(app, m, false)?;
+            }
         }
-        let scale = if m.scale > 0.0 { m.scale } else { 1.0 };
-        let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("overlay.html".into()))
-            .title("QuickShot Capture")
-            .decorations(false)
-            .resizable(false)
-            .maximizable(false)
-            .minimizable(false)
-            .closable(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false)
-            .focused(false)
-            .shadow(false)
-            .visible_on_all_workspaces(true)
-            .background_color(tauri::window::Color(0, 0, 0, 255))
-            .position(m.x as f64 / scale, m.y as f64 / scale)
-            .inner_size(m.width as f64 / scale, m.height as f64 / scale)
-            .build()?;
-        // Re-apply in physical pixels: the builder only accepts logical values and the
-        // logical->physical conversion before the window exists uses an ambiguous DPI.
-        // (and keep it there: moving it onto a monitor with other scaling makes Windows
-        // rescale it, sometimes only after it's shown, which used to spill it onto the next
-        // screen and scramble hit-testing)
-        crate::windows::pin_rect(&window, m.x, m.y, m.width, m.height);
     }
     Ok(())
+}
+
+/// Build hidden overlays for these monitors ahead of the first capture.
+pub fn prewarm(app: &AppHandle, monitors: &[MonitorInfo]) {
+    for m in monitors {
+        if app.get_webview_window(&label_for(m.id)).is_none() {
+            if let Err(e) = build(app, m, true) {
+                log::warn!("overlay warm-up failed: {e}");
+            }
+        }
+    }
+}
+
+/// `warm`: built ahead of time, so the page waits for a start instead of starting itself.
+fn build(app: &AppHandle, m: &MonitorInfo, warm: bool) -> AppResult<()> {
+    let label = label_for(m.id);
+    let scale = if m.scale > 0.0 { m.scale } else { 1.0 };
+    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("overlay.html".into()))
+        .title("QuickShot Capture")
+        .initialization_script(format!("window.__QS_OVERLAY_WARM = {warm};"))
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .focused(false)
+        .shadow(false)
+        .visible_on_all_workspaces(true)
+        .background_color(tauri::window::Color(0, 0, 0, 255))
+        .position(m.x as f64 / scale, m.y as f64 / scale)
+        .inner_size(m.width as f64 / scale, m.height as f64 / scale)
+        .build()?;
+    // Re-apply in physical pixels: the builder only accepts logical values and the
+    // logical->physical conversion before the window exists uses an ambiguous DPI.
+    // (and keep it there: moving it onto a monitor with other scaling makes Windows
+    // rescale it, sometimes only after it's shown, which used to spill it onto the next
+    // screen and scramble hit-testing)
+    crate::windows::pin_rect(&window, m.x, m.y, m.width, m.height);
+    with(&BUILT, |b| b.insert(label, m.rect()));
+    Ok(())
+}
+
+fn forget(label: &str) {
+    with(&POOL, |p| p.remove(label));
+    with(&BUILT, |b| b.remove(label));
+}
+
+/// The page is idle and listening (just loaded warm, or reset after a capture): it can be
+/// reused for the next capture.
+pub fn mark_idle(label: &str) {
+    if let Some(rect) = with(&BUILT, |b| b.get(label).copied()) {
+        with(&POOL, |p| p.insert(label.to_string(), rect));
+    }
 }
 
 /// Show every overlay; focus the one under the cursor so it receives keyboard input.
@@ -63,8 +137,20 @@ pub fn show_all(app: &AppHandle, labels: &[String], focus: Option<&str>) {
     }
 }
 
+/// End of a capture: hide the overlays at once and let their pages reset for the next one.
+pub fn release(app: &AppHandle, labels: &[String]) {
+    for label in labels {
+        if let Some(w) = app.get_webview_window(label) {
+            let _ = w.hide();
+            let _ = w.emit_to(label.as_str(), RESET_EVENT, ());
+        }
+    }
+}
+
+/// Destroy overlays outright (a failed start).
 pub fn close_labels(app: &AppHandle, labels: &[String]) {
     for label in labels {
+        forget(label);
         if let Some(w) = app.get_webview_window(label) {
             let _ = w.hide();
             let _ = w.destroy();

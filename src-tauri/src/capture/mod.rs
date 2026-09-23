@@ -48,8 +48,48 @@ pub fn capture_rect_live(rect: Rect) -> AppResult<RgbaImage> {
     compose_region(&frames, rect)
 }
 
+/// Monitor geometry without capturing anything (overlay warm-up).
+pub fn quick_monitors() -> Vec<MonitorInfo> {
+    let Ok(monitors) = xcap::Monitor::all() else {
+        return Vec::new();
+    };
+    monitors
+        .into_iter()
+        .filter_map(|m| {
+            let id = m.id().ok()?;
+            let scale = m.scale_factor().map(|s| s as f64).unwrap_or(1.0);
+            let s = if scale > 0.0 { scale } else { 1.0 };
+            let (x, y, w, h) = (m.x().ok()?, m.y().ok()?, m.width().ok()?, m.height().ok()?);
+            let rect = if monitors::COORDS_ARE_LOGICAL {
+                Rect::new(
+                    (x as f64 * s) as i32,
+                    (y as f64 * s) as i32,
+                    (w as f64 * s) as u32,
+                    (h as f64 * s) as u32,
+                )
+            } else {
+                Rect::new(x, y, w, h)
+            };
+            Some(MonitorInfo {
+                id,
+                name: String::new(),
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                scale: s,
+                is_primary: m.is_primary().unwrap_or(false),
+                frame_url: String::new(),
+            })
+        })
+        .collect()
+}
+
 /// Capture the monitors whose (approximate, pre-capture) rect passes `wanted`.
 fn capture_monitors(wanted: impl Fn(&Rect) -> bool) -> AppResult<Vec<CaptureFrame>> {
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    // overlays are reused between captures: never let one see a previous frame
+    let nonce = NONCE.fetch_add(1, Ordering::SeqCst);
     let monitors = xcap::Monitor::all()?;
     if monitors.is_empty() {
         return Err(AppError::Capture("no monitors found".into()));
@@ -102,7 +142,7 @@ fn capture_monitors(wanted: impl Fn(&Rect) -> bool) -> AppResult<Vec<CaptureFram
                 height: rect.height,
                 scale: if raw.scale > 0.0 { raw.scale } else { 1.0 },
                 is_primary: m.is_primary().unwrap_or(false),
-                frame_url: protocol::monitor_url(id),
+                frame_url: format!("{}?n={nonce}", protocol::monitor_url(id)),
             },
             image,
         });
@@ -267,9 +307,9 @@ fn mac_window_props() -> HashMap<u32, (i32, f64, String)> {
 }
 
 /// Does `rect` cover (almost) all of one monitor?
-fn covers_a_monitor(rect: &Rect, frames: &[CaptureFrame]) -> bool {
-    frames.iter().any(|f| {
-        let m = f.monitor.rect();
+fn covers_a_monitor(rect: &Rect, screens: &[Rect]) -> bool {
+    screens.iter().any(|m| {
+        let m = *m;
         rect.intersect(&m).is_some_and(|i| {
             i.width as u64 * i.height as u64 * 100 >= m.width as u64 * m.height as u64 * 95
         })
@@ -278,7 +318,7 @@ fn covers_a_monitor(rect: &Rect, frames: &[CaptureFrame]) -> bool {
 
 /// Capturable top-level windows, topmost first. `verbose` logs every candidate and every
 /// skipped window with the reason (window mode), so a log shows what detection saw.
-pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
+pub fn list_windows(screens: &[Rect], verbose: bool) -> Vec<WindowInfo> {
     let windows = match xcap::Window::all() {
         Ok(w) => w,
         Err(e) => {
@@ -286,7 +326,7 @@ pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
             return Vec::new();
         }
     };
-    let screen = Rect::union_all(frames.iter().map(|f| f.monitor.rect())).unwrap_or_default();
+    let screen = Rect::union_all(screens.iter().copied()).unwrap_or_default();
     let count = windows.len() as i32;
     // looking up an app name opens the process; many windows share one
     let mut app_names: HashMap<u32, String> = HashMap::new();
@@ -343,7 +383,7 @@ pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
             continue;
         }
         if let Some(style) = window_style(id) {
-            if let Some(reason) = skip_reason(&style, covers_a_monitor(&rect, frames)) {
+            if let Some(reason) = skip_reason(&style, covers_a_monitor(&rect, screens)) {
                 if verbose {
                     log::info!(
                         "window skipped ({reason}): {title:?} app={app_name:?} class={:?} ex=0x{:x} rect={rect:?}",
@@ -356,7 +396,8 @@ pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
         }
         #[cfg(target_os = "macos")]
         if let Some((layer, alpha, owner)) = mac_props.get(&id) {
-            if let Some(reason) = mac_skip_reason(*layer, *alpha, covers_a_monitor(&rect, frames)) {
+            if let Some(reason) = mac_skip_reason(*layer, *alpha, covers_a_monitor(&rect, screens))
+            {
                 if verbose {
                     log::info!(
                         "window skipped ({reason}): {title:?} app={app_name:?} owner={owner:?} layer={layer} alpha={alpha} rect={rect:?}"
@@ -553,7 +594,20 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
     if !ensure_screen_permission(app) {
         return Ok(());
     }
+    // the window list doesn't depend on the pixels: build it while the screens are grabbed
+    let overlay_mode = !matches!(mode, CaptureMode::Fullscreen | CaptureMode::RepeatLast);
+    let windows = overlay_mode.then(|| {
+        let screens: Vec<Rect> = quick_monitors().iter().map(|m| m.rect()).collect();
+        let verbose = mode == CaptureMode::Window;
+        std::thread::spawn(move || list_windows(&screens, verbose))
+    });
+    let started = Instant::now();
     let frames = capture_all_monitors()?;
+    log::info!(
+        "captured {} monitor(s) in {} ms",
+        frames.len(),
+        started.elapsed().as_millis()
+    );
 
     match mode {
         CaptureMode::Fullscreen => {
@@ -567,7 +621,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
             let rect = source.rect;
             fill_app(
                 &mut source,
-                window_at_center(&list_windows(&frames, false), rect),
+                window_at_center(&list_windows(&screens_of(&frames), false), rect),
             );
             let capture = state.insert_capture(app, frame.image.clone(), source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
@@ -576,7 +630,7 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
             let last = *state.last_region.lock().unwrap();
             let Some(rect) = last else {
                 // nothing to repeat yet: fall back to a fresh region selection
-                return begin_overlay(app, CaptureMode::Region, frames);
+                return begin_overlay(app, CaptureMode::Region, frames, None);
             };
             let image = compose_region(&frames, rect)?;
             let mut source = CaptureSource {
@@ -586,18 +640,31 @@ fn begin(app: &AppHandle, mode: CaptureMode) -> AppResult<()> {
             };
             fill_app(
                 &mut source,
-                window_at_center(&list_windows(&frames, false), rect),
+                window_at_center(&list_windows(&screens_of(&frames), false), rect),
             );
             let capture = state.insert_capture(app, image, source);
             crate::output::after_capture(app, capture, CaptureMode::Region)
         }
-        _ => begin_overlay(app, mode, frames),
+        _ => begin_overlay(app, mode, frames, windows),
     }
 }
 
-fn begin_overlay(app: &AppHandle, mode: CaptureMode, frames: Vec<CaptureFrame>) -> AppResult<()> {
+fn screens_of(frames: &[CaptureFrame]) -> Vec<Rect> {
+    frames.iter().map(|f| f.monitor.rect()).collect()
+}
+
+/// `windows`: the window list, already being built alongside the screen grab.
+fn begin_overlay(
+    app: &AppHandle,
+    mode: CaptureMode,
+    frames: Vec<CaptureFrame>,
+    windows: Option<std::thread::JoinHandle<Vec<WindowInfo>>>,
+) -> AppResult<()> {
     let state = app.state::<AppState>();
-    let windows = list_windows(&frames, mode == CaptureMode::Window);
+    let windows = match windows {
+        Some(job) => job.join().unwrap_or_default(),
+        None => list_windows(&screens_of(&frames), mode == CaptureMode::Window),
+    };
     let monitors: Vec<MonitorInfo> = frames.iter().map(|f| f.monitor.clone()).collect();
     let labels: Vec<String> = monitors.iter().map(|m| overlay::label_for(m.id)).collect();
     let session = CaptureSession {
@@ -731,7 +798,7 @@ pub fn finish(app: &AppHandle, rect: Rect, window_id: Option<u32>) -> AppResult<
         .unwrap()
         .take()
         .ok_or_else(|| AppError::Other("no capture in progress".into()))?;
-    overlay::close_labels(app, &session.labels);
+    overlay::release(app, &session.labels);
 
     let image = compose_region(&session.frames, rect)?;
     let mut source = CaptureSource {
@@ -791,7 +858,7 @@ pub fn cancel(app: &AppHandle) {
     let state = app.state::<AppState>();
     let session = state.session.lock().unwrap().take();
     if let Some(session) = session {
-        overlay::close_labels(app, &session.labels);
+        overlay::release(app, &session.labels);
     }
 }
 

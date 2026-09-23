@@ -136,6 +136,15 @@ pub fn run() {
             let prune_handle = handle.clone();
             std::thread::spawn(move || history::prune(&prune_handle, &settings));
             history::start_ocr_worker(&handle);
+            // load the capture overlays in the background, so even the first capture only has
+            // to grab the screen
+            let warm = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let monitors = crate::capture::quick_monitors();
+                let app = warm.clone();
+                let _ = warm.run_on_main_thread(move || crate::overlay::prewarm(&app, &monitors));
+            });
 
             let args: Vec<String> = std::env::args().skip(1).collect();
             let hidden = args.iter().any(|a| a == "--hidden");
@@ -171,6 +180,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::capture::overlay_init,
             commands::capture::overlay_ready,
+            commands::capture::overlay_idle,
             commands::capture::finish_capture,
             commands::capture::cancel_capture,
             commands::capture::trigger_capture,
