@@ -42,7 +42,8 @@ jobs:
           releaseBody: |
             Unsigned builds.
             * Windows: SmartScreen will warn about an unknown publisher; choose "More info" → "Run anyway".
-            * macOS: after copying to Applications run `xattr -dr com.apple.quarantine /Applications/QuickShot.app`, then grant Screen Recording permission when prompted.
+            * macOS: after copying to Applications run `xattr -dr com.apple.quarantine /Applications/QuickShot.app`, then grant Screen Recording permission when prompted and reopen QuickShot.
+            * macOS updates: ad-hoc signed builds need Screen Recording granted again. Quit QuickShot, run `tccutil reset ScreenCapture com.ecbrown.quickshot`, reopen it and allow.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
