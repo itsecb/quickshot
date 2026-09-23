@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Monochrome tray glyph (macOS template image): same corners + Q, heavier strokes so it
+       stays legible at 16-22 px. Rendered to tray.png / tray@2x.png. -->
+  <g fill="none" stroke="#000000" stroke-width="96" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 330 V180 a68 68 0 0 1 68 -68 H330"/>
+    <path d="M694 112 H844 a68 68 0 0 1 68 68 V330"/>
+    <path d="M112 694 V844 a68 68 0 0 0 68 68 H330"/>
+    <path d="M912 694 V844 a68 68 0 0 1 -68 68 H694"/>
+    <circle cx="492" cy="492" r="170"/>
+    <path d="M560 560 L724 724"/>
+  </g>
+</svg>

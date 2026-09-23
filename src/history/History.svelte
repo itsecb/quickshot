@@ -367,7 +367,13 @@
                 }}
               >
                 <div class="thumb">
-                  <img src={item.thumbUrl} alt="" loading="lazy" draggable="false" />
+                  <img
+                    src={item.thumbUrl}
+                    alt=""
+                    loading="lazy"
+                    draggable="false"
+                    onload={(e) => e.currentTarget.classList.add("loaded")}
+                  />
                   <button
                     class="star"
                     class:on={item.starred}

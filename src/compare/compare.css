@@ -208,3 +208,13 @@ figcaption {
   left: 0;
   overflow: hidden;
 }
+
+/* crossfade when switching views */
+.area > .stack,
+.area > .pair {
+  animation: qs-fade-in 0.18s var(--ease) both;
+}
+
+.box {
+  transition: fill 0.12s var(--ease);
+}

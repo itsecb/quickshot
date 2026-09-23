@@ -1,6 +1,9 @@
 //! Helpers for the editor, pin, guide and main windows plus notifications.
 
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 use tauri_plugin_notification::NotificationExt;
 
 use std::sync::Arc;
@@ -11,6 +14,27 @@ use crate::state::Capture;
 pub fn toast(app: &AppHandle, title: &str, body: &str) {
     if let Err(e) = app.notification().builder().title(title).body(body).show() {
         log::warn!("notification failed: {e}");
+    }
+}
+
+/// Windows start hidden and their page shows them once painted (no white flash). If a page
+/// never gets that far, show the window anyway so it can't go missing.
+fn show_fallback(window: &WebviewWindow) {
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        if !window.is_visible().unwrap_or(true) {
+            log::warn!("{} did not show itself; showing it", window.label());
+            let _ = window.show();
+        }
+    });
+}
+
+/// Build a window (hidden) and arm the show fallback; logs on failure.
+fn build_hidden(builder: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>, what: &str) {
+    match builder.visible(false).build() {
+        Ok(window) => show_fallback(&window),
+        Err(e) => log::error!("{what} window failed: {e}"),
     }
 }
 
@@ -29,15 +53,12 @@ pub fn open_guide(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    let result = WebviewWindowBuilder::new(app, "guide", WebviewUrl::App("guide.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "guide", WebviewUrl::App("guide.html".into()))
         .title("QuickShot Guides")
         .inner_size(1100.0, 760.0)
         .min_inner_size(760.0, 520.0)
-        .center()
-        .build();
-    if let Err(e) = result {
-        log::error!("guide window failed: {e}");
-    }
+        .center();
+    build_hidden(builder, "guide");
 }
 
 pub fn open_history(app: &AppHandle) {
@@ -47,15 +68,12 @@ pub fn open_history(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    let result = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
         .title("QuickShot History")
         .inner_size(1040.0, 720.0)
         .min_inner_size(560.0, 420.0)
-        .center()
-        .build();
-    if let Err(e) = result {
-        log::error!("history window failed: {e}");
-    }
+        .center();
+    build_hidden(builder, "history");
 }
 
 /// Before/after window for two history captures.
@@ -67,18 +85,63 @@ pub fn open_compare(app: &AppHandle, before: u64, after: u64) {
         let _ = w.set_focus();
         return;
     }
-    let result = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("compare.html".into()))
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("compare.html".into()))
         .title("QuickShot Compare")
         .initialization_script(format!(
             "window.__QS_COMPARE = {{ before: {before}, after: {after} }};"
         ))
         .inner_size(1280.0, 820.0)
         .min_inner_size(640.0, 420.0)
-        .center()
-        .build();
-    if let Err(e) = result {
-        log::error!("compare window failed: {e}");
+        .center();
+    build_hidden(builder, "compare");
+}
+
+/// Floating post-capture thumbnail in the corner of the cursor's monitor, with quick actions.
+/// Never takes focus. Replaces any previous thumbnail.
+pub fn open_thumb(app: &AppHandle, capture: &Capture, status: &str) -> AppResult<()> {
+    for (label, w) in app.webview_windows() {
+        if label.starts_with("thumb-") {
+            let _ = w.destroy();
+        }
     }
+    let (img_w, img_h) = capture.image.dimensions();
+    // card: 300 px wide, image box keeps the aspect within 90..190 px, plus header/actions,
+    // and a margin all round so the CSS shadow isn't clipped
+    let card_w = 300.0;
+    let image_h = (card_w * img_h as f64 / img_w.max(1) as f64).clamp(90.0, 190.0);
+    let (w, h) = (card_w + 24.0, image_h + 96.0 + 24.0);
+    let (cx, cy) = app
+        .cursor_position()
+        .map(|p| (p.x as i32, p.y as i32))
+        .unwrap_or((0, 0));
+    let (scale, work) = monitor_at(app, cx, cy);
+    let init = serde_json::json!({ "status": status });
+    let window = WebviewWindowBuilder::new(
+        app,
+        format!("thumb-{}", capture.id),
+        WebviewUrl::App("thumb.html".into()),
+    )
+    .title("QuickShot")
+    .initialization_script(format!("window.__QS_THUMB = {init};"))
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .transparent(true)
+    .focused(false)
+    .focusable(false)
+    .visible(false)
+    .inner_size(w, h)
+    .build()?;
+    if let Some(area) = work {
+        let margin = 12.0 * scale;
+        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
+        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
+        let _ = window.set_position(PhysicalPosition::new(px, py));
+    }
+    show_fallback(&window);
+    Ok(())
 }
 
 pub const COUNTDOWN_LABEL: &str = "countdown";
@@ -110,9 +173,8 @@ pub fn open_countdown(app: &AppHandle, secs: u32) -> AppResult<()> {
     .focused(false)
     .focusable(false)
     .visible(false)
+    .transparent(true)
     .inner_size(w, h);
-    #[cfg(not(target_os = "macos"))]
-    let builder = builder.transparent(true);
     let window = builder.build()?;
     if let Some(area) = work {
         let margin = 24.0 * scale;
@@ -120,7 +182,7 @@ pub fn open_countdown(app: &AppHandle, secs: u32) -> AppResult<()> {
         let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
         let _ = window.set_position(PhysicalPosition::new(px, py));
     }
-    let _ = window.show();
+    show_fallback(&window);
     Ok(())
 }
 
@@ -170,8 +232,7 @@ pub fn open_editor(app: &AppHandle, capture: &Capture) -> AppResult<()> {
     } else {
         let _ = window.center();
     }
-    let _ = window.show();
-    let _ = window.set_focus();
+    show_fallback(&window);
     Ok(())
 }
 
@@ -180,11 +241,10 @@ pub fn open_pin(app: &AppHandle, capture: &Capture, x: i32, y: i32) -> AppResult
     let (img_w, img_h) = capture.image.dimensions();
     let (scale, _) = monitor_at(app, x, y);
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("pin.html".into()));
-    // transparent so the pin's opacity (mouse wheel) shows what is underneath
-    #[cfg(not(target_os = "macos"))]
-    let builder = builder.transparent(true);
     let window = builder
         .title("QuickShot Pin")
+        // transparent so the pin's opacity (mouse wheel) shows what is underneath
+        .transparent(true)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -197,8 +257,7 @@ pub fn open_pin(app: &AppHandle, capture: &Capture, x: i32, y: i32) -> AppResult
         .build()?;
     let _ = window.set_position(PhysicalPosition::new(x, y));
     let _ = window.set_size(LogicalSize::new(img_w as f64 / scale, img_h as f64 / scale));
-    let _ = window.show();
-    let _ = window.set_focus();
+    show_fallback(&window);
     Ok(())
 }
 

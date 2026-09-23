@@ -36,6 +36,7 @@ export interface OverlayInit {
   windows: WindowInfo[];
   lastRegion: Rect | null;
   showMagnifier: boolean;
+  playSound: boolean;
 }
 
 export interface CaptureSource {
@@ -106,6 +107,7 @@ export interface Settings {
   redactPatterns: string[];
   ticketCaption: string;
   rules: Rule[];
+  showThumbnail: boolean;
 }
 
 export interface Rule {

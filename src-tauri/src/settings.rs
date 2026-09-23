@@ -185,6 +185,8 @@ pub struct Settings {
     pub ticket_caption: String,
     /// Per-app behaviour (skip history, auto-redact, auto-copy, save folder).
     pub rules: Vec<Rule>,
+    /// Floating thumbnail with quick actions after Copy/Save captures (else an OS notification).
+    pub show_thumbnail: bool,
 }
 
 impl Default for Settings {
@@ -211,6 +213,7 @@ impl Default for Settings {
             redact_patterns: Vec::new(),
             ticket_caption: "{title} — {app} · {datetime} · {host}".into(),
             rules: crate::rules::default_rules(),
+            show_thumbnail: true,
         }
     }
 }

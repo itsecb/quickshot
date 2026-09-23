@@ -12,6 +12,7 @@ body,
 #app {
   outline: 1px solid rgba(255, 255, 255, 0.35);
   outline-offset: -1px;
+  animation: qs-scale-in 0.18s var(--ease) both;
 }
 
 img {
@@ -21,15 +22,21 @@ img {
   object-fit: fill;
   pointer-events: none;
   image-rendering: auto;
+  transition: opacity 0.12s var(--ease);
 }
 
 .flash {
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max-content;
+  max-width: calc(100% - 16px);
   top: 8px;
-  transform: translateX(-50%);
-  background: rgba(20, 22, 26, 0.9);
-  color: #fff;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
+  animation: qs-slide-up 0.16s var(--ease) both;
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 12px;
@@ -41,9 +48,12 @@ img {
   display: flex;
   flex-direction: column;
   min-width: 140px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
   border-radius: 8px;
+  animation: qs-scale-in 0.12s var(--ease) both;
+  transform-origin: top left;
   box-shadow: var(--shadow);
   padding: 4px;
   z-index: 5;

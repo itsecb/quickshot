@@ -3,6 +3,7 @@
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { copyCapture, currentLabel, pinInit, saveCapture } from "$lib/ipc";
 import { primaryMod } from "$lib/keys";
+import { showWhenReady } from "$lib/window";
 import "./pin.css";
 
 const win = getCurrentWindow();
@@ -16,6 +17,8 @@ async function main() {
   const root = document.getElementById("app")!;
   root.appendChild(img);
   root.setAttribute("data-tauri-drag-region", "");
+  // show once the image has decoded, so the pin appears complete (fading in via CSS)
+  img.decode().then(() => showWhenReady(), () => showWhenReady());
 
   let scale = 1;
   const aspect = info.width / info.height;

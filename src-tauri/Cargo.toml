@@ -1,6 +1,6 @@
 [package]
 name = "quickshot"
-version = "0.5.1"
+version = "0.6.0"
 description = "Fast, lightweight screenshot capture, markup and guide builder"
 authors = ["ecbrown75"]
 edition = "2021"
@@ -14,7 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = ["tray-icon", "image-png"] }
+# macos-private-api: transparent windows on macOS (pins, countdown, thumbnail)
+tauri = { version = "2.11", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"

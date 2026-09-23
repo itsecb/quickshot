@@ -13,6 +13,11 @@
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   --font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+  /* floating chrome over screenshots: capture labels, pin menu, countdown, thumbnail */
+  --chrome-bg: rgba(24, 26, 31, 0.92);
+  --chrome-fg: #f2f3f5;
+  --chrome-border: rgba(255, 255, 255, 0.12);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: dark;
 }
 
@@ -26,6 +31,9 @@
     --border: #d5d8de;
     --accent: #2f6fe4;
     --shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+    --chrome-bg: rgba(255, 255, 255, 0.94);
+    --chrome-fg: #1d1f23;
+    --chrome-border: rgba(0, 0, 0, 0.12);
     color-scheme: light;
   }
 }
@@ -66,6 +74,21 @@ button {
   border-radius: 6px;
   padding: 5px 10px;
   cursor: pointer;
+  transition:
+    background-color 0.12s var(--ease),
+    border-color 0.12s var(--ease),
+    color 0.12s var(--ease),
+    box-shadow 0.12s var(--ease),
+    transform 0.08s var(--ease);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button:hover {
@@ -121,4 +144,52 @@ kbd {
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 5px;
+}
+
+/* ---- motion ---- */
+@keyframes qs-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes qs-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes qs-pop {
+  0% {
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes qs-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* windows open already painted and fade in; the capture overlay must not (it would flash black) */
+body:not([data-page="overlay"]) {
+  animation: qs-fade-in 0.14s var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

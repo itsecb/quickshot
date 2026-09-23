@@ -64,6 +64,15 @@ export const copyCapture = (id: number, rect?: Rect) => invoke<void>("copy_captu
 export const saveCapture = (id: number) => invoke<string>("save_capture", { id });
 export const ocrCapture = (id: number, rect?: Rect) => invoke<OcrOutput>("ocr_capture", { id, rect: rect ?? null });
 export const ocrPng = (png: Uint8Array) => invokeRaw<OcrOutput>("ocr_png", png);
+export interface ThumbInit {
+  id: number;
+  width: number;
+  height: number;
+  pngUrl: string;
+}
+export const thumbInit = (label: string) => invoke<ThumbInit>("thumb_init", { label });
+export const thumbAction = (id: number, action: "edit" | "pin") => invoke<void>("thumb_action", { id, action });
+export const thumbDragPath = (id: number) => invoke<string>("thumb_drag_path", { id });
 export const redactCapture = (id: number) => invoke<RedactMatch[]>("redact_capture", { id });
 export const scanCodes = (id: number) => invoke<ScannedCode[]>("scan_codes", { id });
 /** Copies image + caption (rich clipboard). Returns the caption used. */

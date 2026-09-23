@@ -16,6 +16,7 @@ pub struct OverlayInit {
     pub windows: Vec<WindowInfo>,
     pub last_region: Option<Rect>,
     pub show_magnifier: bool,
+    pub play_sound: bool,
 }
 
 #[tauri::command]
@@ -39,6 +40,7 @@ pub fn overlay_init(state: State<'_, AppState>, label: String) -> AppResult<Over
         windows: session.windows.clone(),
         last_region: *state.last_region.lock().unwrap(),
         show_magnifier: state.settings().show_magnifier,
+        play_sound: state.settings().play_sound,
     })
 }
 

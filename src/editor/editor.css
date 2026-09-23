@@ -207,6 +207,7 @@
 
 .statusbar .toast {
   color: var(--success);
+  animation: qs-slide-up 0.2s var(--ease) both;
 }
 
 .statusbar .toast.error {
@@ -236,6 +237,8 @@
 }
 
 .popover {
+  animation: qs-scale-in 0.14s var(--ease) both;
+  transform-origin: top left;
   position: absolute;
   top: calc(100% + 6px);
   left: 0;

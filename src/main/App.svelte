@@ -215,6 +215,10 @@
           <input id="mag" type="checkbox" bind:checked={settings.showMagnifier} />
         </div>
         <div class="row">
+          <label for="sound">Shutter sound</label>
+          <input id="sound" type="checkbox" bind:checked={settings.playSound} />
+        </div>
+        <div class="row">
           <label for="auto">Start with the system</label>
           <input id="auto" type="checkbox" bind:checked={settings.autostart} />
         </div>
@@ -263,6 +267,11 @@
         <div class="row">
           <label for="cos">Also copy when saving</label>
           <input id="cos" type="checkbox" bind:checked={settings.copyOnSave} />
+        </div>
+        <div class="row">
+          <label for="thumb">Floating thumbnail</label>
+          <input id="thumb" type="checkbox" bind:checked={settings.showThumbnail} />
+          <div class="hint">After a copy or save, a preview slides into the corner with Edit, Pin, Copy and drag-out. Off: a Windows notification instead.</div>
         </div>
         <div class="row">
           <label for="gdir">Guides folder</label>

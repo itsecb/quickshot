@@ -69,10 +69,18 @@ section h2 {
   overflow: hidden;
   cursor: default;
   outline: none;
+  transition:
+    transform 0.16s var(--ease),
+    box-shadow 0.16s var(--ease),
+    border-color 0.16s var(--ease);
+  /* backwards: the finished entrance must not pin `transform` (the hover lift needs it) */
+  animation: qs-slide-up 0.22s var(--ease) backwards;
 }
 
 .card:hover {
   border-color: var(--fg-muted);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
 }
 
 .card.selected {
@@ -95,6 +103,12 @@ section h2 {
   max-height: 100%;
   object-fit: contain;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s var(--ease);
+}
+
+.thumb img.loaded {
+  opacity: 1;
 }
 
 .actions {
@@ -146,11 +160,15 @@ section h2 {
 
 .toast {
   position: fixed;
-  left: 50%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max-content;
   bottom: 18px;
-  transform: translateX(-50%);
-  background: rgba(20, 22, 26, 0.94);
-  color: #fff;
+  animation: qs-slide-up 0.18s var(--ease) both;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
   padding: 7px 14px;
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -197,6 +215,7 @@ section h2 {
 
 .star.on {
   color: #f5b301;
+  animation: qs-pop 0.35s var(--ease);
 }
 
 .snippet {

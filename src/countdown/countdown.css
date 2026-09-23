@@ -12,16 +12,50 @@ body,
   height: 100%;
   padding: 0 10px 0 14px;
   border-radius: 14px;
-  background: rgba(20, 22, 26, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  animation: qs-slide-up 0.25s var(--ease) both;
+}
+
+.dial {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
+.dial svg {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+
+.dial circle {
+  fill: none;
+  stroke-width: 3;
+}
+
+.dial .track {
+  stroke: var(--chrome-border);
+}
+
+.dial .bar {
+  stroke: var(--accent);
+  stroke-linecap: round;
+}
+
+.dial .num {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
 }
 
 .num {
-  font-size: 30px;
-  font-weight: 600;
-  min-width: 26px;
-  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
 }
@@ -29,17 +63,19 @@ body,
 .label {
   flex: 1;
   font-size: 13px;
-  color: #d8dae0;
+  opacity: 0.8;
 }
 
 .cancel {
   background: transparent;
   border: 0;
-  color: #d8dae0;
+  color: inherit;
+  opacity: 0.7;
   font-size: 14px;
   padding: 4px 8px;
 }
 
 .cancel:hover {
-  background: rgba(255, 255, 255, 0.12);
+  opacity: 1;
+  background: var(--chrome-border);
 }

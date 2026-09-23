@@ -69,6 +69,11 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
         .item(&item("quit", "Quit QuickShot", "")?)
         .build()?;
 
+    // macOS: a monochrome template glyph that follows the light/dark menu bar.
+    // Windows/Linux: the colored app icon, legible on light and dark taskbars.
+    #[cfg(target_os = "macos")]
+    let icon = tauri::include_image!("icons/tray.png");
+    #[cfg(not(target_os = "macos"))]
     let icon = app
         .default_window_icon()
         .cloned()
@@ -76,6 +81,7 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("QuickShot")
         .menu(&menu)
         .show_menu_on_left_click(false)

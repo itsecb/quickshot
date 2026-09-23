@@ -37,3 +37,58 @@ export function rectEquals(a: Rect | null, b: Rect | null): boolean {
   if (!a || !b) return a === b;
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
+
+/** A straight edge: `pos` on one axis, spanning `from`..`to` on the other. */
+export interface Edge {
+  pos: number;
+  from: number;
+  to: number;
+}
+
+export interface Snapped {
+  x: number;
+  y: number;
+  /** the edge each axis snapped to, if any */
+  snapX: number | null;
+  snapY: number | null;
+}
+
+/**
+ * Pull a point onto the nearest edge within `threshold`, per axis. Only edges that actually
+ * pass near the point count (a window's left edge doesn't attract a point far above it).
+ * `vertical` edges have an x position, `horizontal` ones a y position.
+ */
+export function snapPoint(x: number, y: number, vertical: Edge[], horizontal: Edge[], threshold: number): Snapped {
+  const nearest = (v: number, across: number, edges: Edge[]) => {
+    let best: number | null = null;
+    let bestDist = threshold;
+    for (const e of edges) {
+      if (across < e.from - threshold || across > e.to + threshold) continue;
+      const d = Math.abs(e.pos - v);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = e.pos;
+      }
+    }
+    return best;
+  };
+  const snapX = nearest(x, y, vertical);
+  const snapY = nearest(y, x, horizontal);
+  return { x: snapX ?? x, y: snapY ?? y, snapX, snapY };
+}
+
+/** Edges of a rect, for snapping. */
+export function rectEdges(r: Rect): { vertical: Edge[]; horizontal: Edge[] } {
+  const right = r.x + r.width;
+  const bottom = r.y + r.height;
+  return {
+    vertical: [
+      { pos: r.x, from: r.y, to: bottom },
+      { pos: right, from: r.y, to: bottom },
+    ],
+    horizontal: [
+      { pos: r.y, from: r.x, to: right },
+      { pos: bottom, from: r.x, to: right },
+    ],
+  };
+}

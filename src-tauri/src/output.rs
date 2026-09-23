@@ -138,12 +138,8 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
             }
             AfterCapture::Copy => {
                 copy_to_clipboard(app, &shared.image)?;
-                state.remove_capture(capture.id);
-                windows::toast(
-                    app,
-                    "Copied to clipboard",
-                    &format!("{}×{}", capture.image.width(), capture.image.height()),
-                );
+                let size = format!("{}×{}", shared.image.width(), shared.image.height());
+                confirm(app, &settings, shared, "Copied to clipboard", &size);
                 Ok(())
             }
             AfterCapture::Save | AfterCapture::CopyAndSave => {
@@ -154,11 +150,37 @@ pub fn after_capture(app: &AppHandle, capture: Arc<Capture>, mode: CaptureMode) 
                 {
                     copy_to_clipboard(app, &shared.image)?;
                 }
-                state.remove_capture(capture.id);
-                windows::toast(app, "Saved", &path.display().to_string());
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                confirm(app, &settings, shared, "Saved", &name);
                 Ok(())
             }
         },
+    }
+}
+
+/// Tell the user a capture went to the clipboard/folder: the floating thumbnail (which keeps
+/// the capture alive for its quick actions), or an OS notification when that's switched off.
+fn confirm(app: &AppHandle, settings: &Settings, capture: Arc<Capture>, title: &str, detail: &str) {
+    let state = app.state::<AppState>();
+    if !settings.show_thumbnail {
+        state.remove_capture(capture.id);
+        windows::toast(app, title, detail);
+        return;
+    }
+    // the thumbnail's actions work on exactly what was copied/saved (e.g. the redacted pixels)
+    state.replace_capture(capture.clone());
+    let status = format!("{title} · {detail}");
+    let app2 = app.clone();
+    let result = app.run_on_main_thread(move || {
+        if let Err(e) = windows::open_thumb(&app2, &capture, &status) {
+            log::error!("thumbnail failed: {e}");
+        }
+    });
+    if let Err(e) = result {
+        log::error!("thumbnail failed: {e}");
     }
 }
 

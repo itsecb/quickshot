@@ -297,3 +297,74 @@ pub fn copy_image_rich(
     output::copy_rich(&app, &img, &bytes, &caption)?;
     Ok(caption)
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbInit {
+    pub id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub png_url: String,
+}
+
+#[tauri::command]
+pub fn thumb_init(state: State<'_, AppState>, label: String) -> AppResult<ThumbInit> {
+    let id = crate::state::capture_id_from_label(&label)
+        .ok_or_else(|| AppError::Other("bad thumbnail label".into()))?;
+    let capture = state
+        .capture(id)
+        .ok_or_else(|| AppError::NotFound("capture expired".into()))?;
+    Ok(ThumbInit {
+        id,
+        width: capture.image.width(),
+        height: capture.image.height(),
+        png_url: protocol::capture_png_url(id),
+    })
+}
+
+/// Opens a window on the main thread.
+type OpenWindow = Box<dyn FnOnce(&AppHandle) -> AppResult<()> + Send>;
+
+/// Thumbnail quick actions: "edit" | "pin". The page closes itself afterwards.
+#[tauri::command(async)]
+pub fn thumb_action(app: AppHandle, id: u64, action: String) -> AppResult<()> {
+    let capture = app
+        .state::<AppState>()
+        .capture(id)
+        .ok_or_else(|| AppError::NotFound("capture expired".into()))?;
+    let open: OpenWindow = match action.as_str() {
+        "edit" => Box::new(move |app| windows::open_editor(app, &capture)),
+        "pin" => Box::new(move |app| {
+            let (x, y) = (capture.source.rect.x, capture.source.rect.y);
+            windows::open_pin(app, &capture, x, y)
+        }),
+        other => return Err(AppError::Other(format!("unknown thumbnail action {other}"))),
+    };
+    // Wait until the new window exists: the thumbnail closes itself right after this returns,
+    // and closing the last window that uses a capture frees it.
+    let (done, wait) = std::sync::mpsc::channel();
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = done.send(open(&app2));
+    })?;
+    wait.recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| AppError::Other("timed out opening the window".into()))?
+}
+
+/// A temp PNG of the capture for native drag-out from the thumbnail.
+#[tauri::command(async)]
+pub fn thumb_drag_path(app: AppHandle, id: u64) -> AppResult<String> {
+    let capture = app
+        .state::<AppState>()
+        .capture(id)
+        .ok_or_else(|| AppError::NotFound("capture expired".into()))?;
+    let stem = settings::expand_pattern(
+        &app.state::<AppState>().settings().file_pattern,
+        &capture.source.app_name,
+        &capture.source.title,
+        capture.image.width(),
+        capture.image.height(),
+    );
+    let png = crate::image_util::encode_png(&capture.image)?;
+    Ok(output::temp_png(&app, &png, &stem)?.display().to_string())
+}

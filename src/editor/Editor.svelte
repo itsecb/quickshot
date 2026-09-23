@@ -714,7 +714,7 @@
       {/if}
       <span>{status}</span>
       <span class="spacer"></span>
-      {#if toast}<span class="toast" class:error={toast.error}>{toast.text}</span>{/if}
+      {#if toast}{#key toast}<span class="toast" class:error={toast.error}>{toast.text}</span>{/key}{/if}
       <button class="tool" onclick={fit} title="Fit (Ctrl+0)" style="height:22px;width:26px">{@html icon("fit")}</button>
       <span title="Zoom (Ctrl+wheel, Ctrl+1 = 100%)">{Math.round(zoom * 100)}%</span>
     </div>

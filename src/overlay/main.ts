@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cancelCapture, copyText, finishCapture, overlayInit, overlayReady } from "$lib/ipc";
 import { fetchRawToCanvas } from "$lib/image";
-import { rectContains, rectFromPoints, rectIntersect, rectRound } from "$lib/geometry";
+import { rectContains, rectEdges, rectEquals, rectFromPoints, rectIntersect, rectRound, snapPoint, type Edge } from "$lib/geometry";
 import { rgbToHex } from "$lib/image";
 import type { OverlayInit, Rect, WindowInfo } from "$lib/types";
 import "./overlay.css";
@@ -17,13 +17,73 @@ interface Point {
   y: number;
 }
 
+// "reduce motion" in the OS: no gliding or fading, and a still (not travelling) border
+const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const DIM = 0.38;
+const DIM_COLOR_MODE = 0.08;
+const FADE_MS = REDUCED_MOTION ? 1 : 150;
+const GLIDE_MS = REDUCED_MOTION ? 1 : 120;
+const FLASH_MS = 140;
+const SNAP_PX = 8;
+const GRADIENT = ["#4c8dff", "#7b5cff", "#35d0ff"];
+
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const lerpRect = (a: Rect, b: Rect, t: number): Rect => ({
+  x: lerp(a.x, b.x, t),
+  y: lerp(a.y, b.y, t),
+  width: lerp(a.width, b.width, t),
+  height: lerp(a.height, b.height, t),
+});
+
+/** Short synthesized shutter click (no audio asset): band-passed noise with a fast decay. */
+function playShutter() {
+  try {
+    const ac = new AudioContext();
+    const len = Math.floor(ac.sampleRate * 0.09);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const band = ac.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.value = 2400;
+    band.Q.value = 0.8;
+    const gain = ac.createGain();
+    gain.gain.value = 0.45;
+    src.connect(band).connect(gain).connect(ac.destination);
+    src.start();
+    setTimeout(() => void ac.close(), 400);
+  } catch {
+    // audio unavailable: the flash is enough
+  }
+}
+
+/** Theme colours for labels and the hint pill (the dim layer itself stays dark). */
+function chromeColors() {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    bg: v("--chrome-bg", "rgba(20,22,26,0.9)"),
+    fg: v("--chrome-fg", "#ffffff"),
+    border: v("--chrome-border", "rgba(255,255,255,0.14)"),
+    font: getComputedStyle(document.body).fontFamily,
+  };
+}
+
 class Overlay {
   private canvas = document.createElement("canvas");
   private ctx: CanvasRenderingContext2D;
+  /** CPU-side copy, only for reading pixel colours. */
   private frame!: HTMLCanvasElement;
   private frameCtx!: CanvasRenderingContext2D;
+  /** GPU-friendly copies for drawing every frame: the frozen screen, and the same dimmed. */
+  private clean!: HTMLCanvasElement;
+  private dimmed!: HTMLCanvasElement;
   private init!: OverlayInit;
   private dpr = window.devicePixelRatio || 1;
+  private chrome!: ReturnType<typeof chromeColors>;
   private cursor: Point | null = null; // local physical px
   private dragStart: Point | null = null; // global physical px
   private selection: Rect | null = null; // global physical px, while dragging
@@ -31,9 +91,20 @@ class Overlay {
   private hoverWindow: WindowInfo | null = null;
   private finished = false;
   private raf = 0;
+  private looping = false;
   private unlisten: UnlistenFn[] = [];
   private lastEmit = 0;
   private hint = "";
+  // animation state
+  private fadeStart = 0; // 0 = not faded in yet (dim stays off until the overlay is shown)
+  private shown: Rect | null = null; // highlight as drawn (local px), gliding toward the target
+  private glideFrom: Rect | null = null;
+  private glideTarget: Rect | null = null;
+  private glideStart = 0;
+  private flashStart = 0;
+  private snapGuide: { x: number | null; y: number | null } = { x: null, y: null };
+  private vEdges: Edge[] = [];
+  private hEdges: Edge[] = [];
 
   constructor() {
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
@@ -41,15 +112,35 @@ class Overlay {
   }
 
   async start() {
+    this.chrome = chromeColors(); // stylesheets are applied by now
     this.init = await overlayInit(label);
     this.frame = await fetchRawToCanvas(this.init.monitor.frameUrl);
     this.frameCtx = this.frame.getContext("2d", { willReadFrequently: true })!;
-    this.canvas.width = this.frame.width;
-    this.canvas.height = this.frame.height;
+    const { width, height } = this.frame;
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.clean = document.createElement("canvas");
+    this.clean.width = width;
+    this.clean.height = height;
+    this.clean.getContext("2d")!.drawImage(this.frame, 0, 0);
+    this.dimmed = document.createElement("canvas");
+    this.dimmed.width = width;
+    this.dimmed.height = height;
+    const dctx = this.dimmed.getContext("2d")!;
+    dctx.drawImage(this.frame, 0, 0);
+    dctx.fillStyle = `rgba(0,0,0,${this.init.mode === "color" ? DIM_COLOR_MODE : DIM})`;
+    dctx.fillRect(0, 0, width, height);
+    for (const r of [...this.init.windows.map((w) => w.rect), ...this.init.monitors]) {
+      const e = rectEdges(r);
+      this.vEdges.push(...e.vertical);
+      this.hEdges.push(...e.horizontal);
+    }
     this.hint = this.hintText();
-    this.render();
+    this.render(); // undimmed first frame: identical to the live screen when shown
     this.bind();
     await overlayReady(label);
+    this.fadeStart = performance.now();
+    this.schedule();
   }
 
   private hintText(): string {
@@ -65,7 +156,7 @@ class Overlay {
       case "qr":
         return "Select a QR code or barcode to copy its contents · Esc cancels";
       default:
-        return "Drag a region · click a window · Enter = whole screen · Esc cancels";
+        return "Drag a region (Alt: no snapping) · click a window · Enter = whole screen · Esc cancels";
     }
   }
 
@@ -75,6 +166,9 @@ class Overlay {
   }
   private toGlobal(p: Point): Point {
     return { x: p.x + this.init.monitor.x, y: p.y + this.init.monitor.y };
+  }
+  private toLocalRect(r: Rect): Rect {
+    return { x: r.x - this.init.monitor.x, y: r.y - this.init.monitor.y, width: r.width, height: r.height };
   }
   private screenBounds(): Rect {
     const ms = this.init.monitors;
@@ -95,6 +189,17 @@ class Overlay {
       if (rectContains(w.rect, global.x, global.y)) return w;
     }
     return null;
+  }
+
+  /** Snap a global point to nearby window/monitor edges unless Alt is held. */
+  private snap(p: Point, e: MouseEvent | null): Point {
+    if (e?.altKey || this.init.mode === "color") {
+      this.snapGuide = { x: null, y: null };
+      return p;
+    }
+    const s = snapPoint(p.x, p.y, this.vEdges, this.hEdges, SNAP_PX * this.dpr);
+    this.snapGuide = { x: s.snapX, y: s.snapY };
+    return { x: s.x, y: s.y };
   }
 
   // ---- events ----
@@ -137,7 +242,8 @@ class Overlay {
     this.cursor = local;
     const global = this.toGlobal(local);
     if (this.dragStart) {
-      this.selection = rectRound(rectFromPoints(this.dragStart.x, this.dragStart.y, global.x, global.y));
+      const end = this.snap(global, e);
+      this.selection = rectRound(rectFromPoints(this.dragStart.x, this.dragStart.y, end.x, end.y));
       this.hoverWindow = null;
       this.broadcast();
     } else if (this.init.mode !== "color") {
@@ -155,7 +261,7 @@ class Overlay {
       void this.pickColor(e.shiftKey);
       return;
     }
-    this.dragStart = global;
+    this.dragStart = this.snap(global, e);
     this.selection = null;
   }
 
@@ -164,7 +270,9 @@ class Overlay {
     const start = this.dragStart;
     this.dragStart = null;
     const global = this.toGlobal(this.toLocal(e));
-    const sel = rectRound(rectFromPoints(start.x, start.y, global.x, global.y));
+    const end = this.snap(global, e);
+    this.snapGuide = { x: null, y: null };
+    const sel = rectRound(rectFromPoints(start.x, start.y, end.x, end.y));
     this.broadcast(null);
     if (sel.width < 4 || sel.height < 4) {
       // a click: capture the window under the cursor, else the whole monitor
@@ -221,6 +329,7 @@ class Overlay {
         this.cursor = { x: this.cursor.x + delta.x, y: this.cursor.y + delta.y };
         if (this.dragStart) {
           const g = this.toGlobal(this.cursor);
+          this.snapGuide = { x: null, y: null }; // keyboard nudges are exact
           this.selection = rectRound(rectFromPoints(this.dragStart.x, this.dragStart.y, g.x, g.y));
         }
         this.schedule();
@@ -242,12 +351,17 @@ class Overlay {
     if (!clipped || clipped.width < 1 || clipped.height < 1) return;
     this.finished = true;
     this.selection = clipped;
-    this.render();
+    this.flashStart = performance.now();
+    if (this.init.playSound) playShutter();
+    this.schedule();
+    // the image is already frozen: a brief flash costs nothing and confirms the shot
+    await new Promise((r) => setTimeout(r, FLASH_MS));
     try {
       await finishCapture(rectRound(clipped), windowId);
     } catch (err) {
       console.error(err);
       this.finished = false;
+      this.flashStart = 0;
     }
   }
 
@@ -276,57 +390,97 @@ class Overlay {
     return [d[0]!, d[1]!, d[2]!];
   }
 
-  // ---- drawing ----
+  // ---- animation loop ----
+  /** Render once on the next frame; keeps looping while something is animating. */
   private schedule() {
     if (this.raf) return;
-    this.raf = requestAnimationFrame(() => {
+    this.raf = requestAnimationFrame((now) => {
       this.raf = 0;
-      this.render();
+      this.render(now);
+      if (this.looping) this.schedule();
     });
   }
 
-  private render() {
+  private activeRect(): Rect | null {
+    return this.selection ?? this.remoteSelection ?? this.hoverWindow?.rect ?? null;
+  }
+
+  /** Where the highlight is drawn: glides between hovered windows, follows drags exactly. */
+  private updateShown(now: number): boolean {
+    const active = this.activeRect();
+    const target = active ? this.toLocalRect(active) : null;
+    const dragging = !!(this.selection || this.remoteSelection);
+    if (!target) {
+      this.shown = this.glideTarget = this.glideFrom = null;
+      return false;
+    }
+    if (dragging || !this.shown) {
+      this.shown = this.glideTarget = target;
+      this.glideFrom = null;
+      return false;
+    }
+    if (!rectEquals(target, this.glideTarget)) {
+      this.glideFrom = this.shown;
+      this.glideTarget = target;
+      this.glideStart = now;
+    }
+    if (!this.glideFrom) return false;
+    const t = Math.min(1, (now - this.glideStart) / GLIDE_MS);
+    this.shown = lerpRect(this.glideFrom, target, easeOutCubic(t));
+    if (t >= 1) this.glideFrom = null;
+    return t < 1;
+  }
+
+  private render(now = performance.now()) {
     const { ctx, canvas, dpr } = this;
     const W = canvas.width;
     const H = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.frame, 0, 0);
 
-    const mon = this.init.monitor;
-    const toLocalRect = (r: Rect): Rect => ({ x: r.x - mon.x, y: r.y - mon.y, width: r.width, height: r.height });
+    // dimmed screen, fading in once the overlay is visible
+    const fade = this.fadeStart ? Math.min(1, (now - this.fadeStart) / FADE_MS) : 0;
+    if (fade < 1) ctx.drawImage(this.clean, 0, 0);
+    if (fade > 0) {
+      ctx.globalAlpha = easeOutCubic(fade);
+      ctx.drawImage(this.dimmed, 0, 0);
+      ctx.globalAlpha = 1;
+    }
 
-    // dim everything, then punch out the active area
-    const active: Rect | null = this.selection ?? this.remoteSelection ?? this.hoverWindow?.rect ?? null;
-    ctx.fillStyle = this.init.mode === "color" ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.38)";
-    ctx.fillRect(0, 0, W, H);
-    if (active) {
-      const l = toLocalRect(active);
-      const vis = rectIntersect(l, { x: 0, y: 0, width: W, height: H });
-      if (vis) {
-        ctx.drawImage(this.frame, vis.x, vis.y, vis.width, vis.height, vis.x, vis.y, vis.width, vis.height);
-        const selecting = !!(this.selection || this.remoteSelection);
-        ctx.lineWidth = (selecting ? 2 : 1.5) * dpr;
-        ctx.strokeStyle = selecting ? "#4c8dff" : "#ffcc00";
-        ctx.setLineDash([]);
-        ctx.strokeRect(vis.x + 0.5, vis.y + 0.5, vis.width - 1, vis.height - 1);
-        if (selecting) this.drawCorners(vis);
+    const gliding = this.updateShown(now);
+    const active = this.activeRect();
+    const shown = this.shown;
+    const vis = shown ? rectIntersect(shown, { x: 0, y: 0, width: W, height: H }) : null;
+    if (vis && active) {
+      // undimmed window/selection, then the animated border
+      ctx.drawImage(this.clean, vis.x, vis.y, vis.width, vis.height, vis.x, vis.y, vis.width, vis.height);
+      this.drawBorder(vis, now);
+      if (this.selection || this.remoteSelection) this.drawCorners(vis);
+      this.drawSnapGuides(vis);
+      if (!this.finished) {
         this.drawLabel(`${active.width} × ${active.height}`, vis.x, vis.y - 8 * dpr, vis);
         if (this.hoverWindow && !this.selection) {
           const t = this.hoverWindow.title || this.hoverWindow.appName;
-          if (t) this.drawLabel(t.slice(0, 80), vis.x, vis.y + vis.height + 22 * dpr, vis, true);
+          if (t) this.drawLabel(t.slice(0, 80), vis.x, vis.y + vis.height + 30 * dpr, vis, true);
         }
       }
     }
 
     // ghost of the last region
     if (this.init.lastRegion && !active) {
-      const l = toLocalRect(this.init.lastRegion);
+      const l = this.toLocalRect(this.init.lastRegion);
       ctx.setLineDash([6 * dpr, 4 * dpr]);
       ctx.strokeStyle = "rgba(255,255,255,0.45)";
       ctx.lineWidth = dpr;
       ctx.strokeRect(l.x + 0.5, l.y + 0.5, l.width - 1, l.height - 1);
       ctx.setLineDash([]);
+    }
+
+    // capture flash
+    const flash = this.flashStart ? Math.min(1, (now - this.flashStart) / FLASH_MS) : 1;
+    if (flash < 1 && vis) {
+      ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - flash)})`;
+      ctx.fillRect(vis.x, vis.y, vis.width, vis.height);
     }
 
     if (this.cursor && !this.finished) {
@@ -337,22 +491,99 @@ class Overlay {
     }
 
     if (!this.finished) this.drawHint();
+
+    // keep animating while the border is visible (it moves) or something is still easing
+    this.looping = (!!vis && !REDUCED_MOTION) || fade < 1 || gliding || flash < 1;
+  }
+
+  /** Glow plus a colour sweep that travels around the rectangle, with marching dashes on top. */
+  private drawBorder(r: Rect, time: number) {
+    const { ctx, dpr } = this;
+    const now = REDUCED_MOTION ? 0 : time;
+    const x = r.x + 0.5;
+    const y = r.y + 0.5;
+    const w = Math.max(0, r.width - 1);
+    const h = Math.max(0, r.height - 1);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.shadowColor = "rgba(90,130,255,0.9)";
+    ctx.shadowBlur = 14 * dpr;
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeStyle = "rgba(76,141,255,0.85)";
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+
+    ctx.save();
+    ctx.lineWidth = 2.5 * dpr;
+    if (typeof ctx.createConicGradient === "function") {
+      const g = ctx.createConicGradient((now / 900) % (Math.PI * 2), x + w / 2, y + h / 2);
+      g.addColorStop(0, GRADIENT[0]!);
+      g.addColorStop(0.33, GRADIENT[1]!);
+      g.addColorStop(0.66, GRADIENT[2]!);
+      g.addColorStop(1, GRADIENT[0]!);
+      ctx.strokeStyle = g;
+    } else {
+      ctx.strokeStyle = GRADIENT[0]!;
+    }
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([10 * dpr, 10 * dpr]);
+    ctx.lineDashOffset = -((now / 25) % (20 * dpr));
+    ctx.lineWidth = 1.2 * dpr;
+    ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+  }
+
+  /** Accent lines along edges the selection snapped to. */
+  private drawSnapGuides(sel: Rect) {
+    const { ctx, dpr, canvas } = this;
+    const { x, y } = this.snapGuide;
+    if (x === null && y === null) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(53,208,255,0.9)";
+    ctx.lineWidth = dpr;
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
+    ctx.beginPath();
+    const ext = 40 * dpr;
+    if (x !== null) {
+      const lx = x - this.init.monitor.x + 0.5;
+      ctx.moveTo(lx, Math.max(0, sel.y - ext));
+      ctx.lineTo(lx, Math.min(canvas.height, sel.y + sel.height + ext));
+    }
+    if (y !== null) {
+      const ly = y - this.init.monitor.y + 0.5;
+      ctx.moveTo(Math.max(0, sel.x - ext), ly);
+      ctx.lineTo(Math.min(canvas.width, sel.x + sel.width + ext), ly);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private roundRect(x: number, y: number, w: number, h: number, r: number) {
+    const { ctx } = this;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
   }
 
   private drawLabel(text: string, x: number, y: number, anchor: Rect, below = false) {
     const { ctx, dpr, canvas } = this;
-    ctx.font = `${12 * dpr}px ${getComputedStyle(document.body).fontFamily}`;
-    const padX = 6 * dpr;
+    ctx.font = `600 ${12 * dpr}px ${this.chrome.font}`;
+    const padX = 8 * dpr;
     const w = ctx.measureText(text).width + padX * 2;
-    const h = 20 * dpr;
+    const h = 22 * dpr;
     let bx = x;
     let by = y - h;
     if (by < 0) by = anchor.y + 4 * dpr;
     if (below) by = Math.min(y - h, canvas.height - h);
     bx = Math.max(0, Math.min(bx, canvas.width - w));
-    ctx.fillStyle = "rgba(20,22,26,0.9)";
-    ctx.fillRect(bx, by, w, h);
-    ctx.fillStyle = "#fff";
+    this.roundRect(bx, by, w, h, 6 * dpr);
+    ctx.fillStyle = this.chrome.bg;
+    ctx.fill();
+    ctx.lineWidth = dpr;
+    ctx.strokeStyle = this.chrome.border;
+    ctx.stroke();
+    ctx.fillStyle = this.chrome.fg;
     ctx.textBaseline = "middle";
     ctx.fillText(text, bx + padX, by + h / 2);
   }
@@ -360,18 +591,20 @@ class Overlay {
   /** Small square handles on the selection's corners, so the frame reads as a whole box. */
   private drawCorners(r: Rect) {
     const { ctx, dpr } = this;
-    const size = 6 * dpr;
+    const size = 7 * dpr;
     ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = "#4c8dff";
+    ctx.strokeStyle = GRADIENT[0]!;
     ctx.lineWidth = 1.5 * dpr;
+    ctx.setLineDash([]);
     for (const [x, y] of [
       [r.x, r.y],
       [r.x + r.width, r.y],
       [r.x, r.y + r.height],
       [r.x + r.width, r.y + r.height],
     ] as const) {
-      ctx.fillRect(x - size / 2, y - size / 2, size, size);
-      ctx.strokeRect(x - size / 2, y - size / 2, size, size);
+      this.roundRect(x - size / 2, y - size / 2, size, size, 2 * dpr);
+      ctx.fill();
+      ctx.stroke();
     }
   }
 
@@ -407,22 +640,23 @@ class Overlay {
     if (y + size + labelH > canvas.height) y = p.y - 24 * dpr - size - labelH;
     x = Math.max(0, x);
     y = Math.max(0, y);
+    const radius = 8 * dpr;
 
     ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.45)";
+    ctx.shadowBlur = 16 * dpr;
+    this.roundRect(x, y, size, size + labelH, radius);
+    ctx.fillStyle = this.chrome.bg;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    this.roundRect(x, y, size, size + labelH, radius);
+    ctx.clip();
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#000";
-    ctx.fillRect(x, y, size, size + labelH);
-    ctx.drawImage(
-      this.frame,
-      Math.floor(p.x) - half,
-      Math.floor(p.y) - half,
-      grid,
-      grid,
-      x,
-      y,
-      size,
-      size,
-    );
+    ctx.fillRect(x, y, size, size);
+    ctx.drawImage(this.clean, Math.floor(p.x) - half, Math.floor(p.y) - half, grid, grid, x, y, size, size);
     // pixel grid
     ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.lineWidth = 1;
@@ -437,36 +671,43 @@ class Overlay {
     ctx.stroke();
     // centre pixel
     const c = half * zoom * dpr;
-    ctx.strokeStyle = "#4c8dff";
+    ctx.strokeStyle = GRADIENT[0]!;
     ctx.lineWidth = 2 * dpr;
     ctx.strokeRect(x + c, y + c, zoom * dpr, zoom * dpr);
-    // border + readout
-    ctx.strokeStyle = "rgba(255,255,255,0.6)";
-    ctx.lineWidth = dpr;
-    ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size + labelH - 1);
+    // readout
     const [r, g, b] = this.pixelAt(p);
     const gx = Math.floor(p.x) + this.init.monitor.x;
     const gy = Math.floor(p.y) + this.init.monitor.y;
-    ctx.fillStyle = "#fff";
-    ctx.font = `${11 * dpr}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.fillStyle = this.chrome.fg;
+    ctx.font = `${11 * dpr}px ${this.chrome.font}`;
     ctx.textBaseline = "middle";
     ctx.fillText(`${rgbToHex(r, g, b)}   ${gx}, ${gy}`, x + 8 * dpr, y + size + labelH / 2);
     ctx.fillStyle = rgbToHex(r, g, b);
-    ctx.fillRect(x + size - 22 * dpr, y + size + 5 * dpr, 16 * dpr, labelH - 10 * dpr);
+    this.roundRect(x + size - 22 * dpr, y + size + 5 * dpr, 16 * dpr, labelH - 10 * dpr, 3 * dpr);
+    ctx.fill();
     ctx.restore();
+
+    this.roundRect(x + 0.5, y + 0.5, size - 1, size + labelH - 1, radius);
+    ctx.strokeStyle = this.chrome.border;
+    ctx.lineWidth = dpr;
+    ctx.stroke();
   }
 
   private drawHint() {
     const { ctx, canvas, dpr } = this;
-    ctx.font = `${12 * dpr}px ${getComputedStyle(document.body).fontFamily}`;
-    const padX = 10 * dpr;
+    ctx.font = `${12 * dpr}px ${this.chrome.font}`;
+    const padX = 12 * dpr;
     const w = ctx.measureText(this.hint).width + padX * 2;
-    const h = 26 * dpr;
+    const h = 28 * dpr;
     const x = (canvas.width - w) / 2;
     const y = 18 * dpr;
-    ctx.fillStyle = "rgba(20,22,26,0.82)";
-    ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = "#e8e9ec";
+    this.roundRect(x, y, w, h, h / 2);
+    ctx.fillStyle = this.chrome.bg;
+    ctx.fill();
+    ctx.lineWidth = dpr;
+    ctx.strokeStyle = this.chrome.border;
+    ctx.stroke();
+    ctx.fillStyle = this.chrome.fg;
     ctx.textBaseline = "middle";
     ctx.fillText(this.hint, x + padX, y + h / 2);
   }

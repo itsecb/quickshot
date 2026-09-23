@@ -70,11 +70,12 @@ pub struct Capture {
     pub created: chrono::DateTime<chrono::Local>,
 }
 
-/// `editor-<id>` / `pin-<id>` -> id. Other labels (overlay-<monitor>) never match.
+/// `editor-<id>` / `pin-<id>` / `thumb-<id>` -> id. Other labels (overlay-<monitor>) never match.
 pub fn capture_id_from_label(label: &str) -> Option<u64> {
     let rest = label
         .strip_prefix("editor-")
-        .or_else(|| label.strip_prefix("pin-"))?;
+        .or_else(|| label.strip_prefix("pin-"))
+        .or_else(|| label.strip_prefix("thumb-"))?;
     rest.parse().ok()
 }
 
