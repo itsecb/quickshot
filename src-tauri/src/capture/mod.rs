@@ -186,6 +186,86 @@ fn window_style(_id: u32) -> Option<WinStyle> {
     None
 }
 
+/// Window-server layer of normal app windows on macOS. Floating panels and modal sheets sit a
+/// little above it; the Dock, menu bar, status items, Notification Center and system overlays
+/// (some invisible and covering a whole screen) are far above it.
+const MAC_TOP_APP_LAYER: i32 = 17;
+
+/// macOS counterpart of `skip_reason`: without this a full-screen system window at a high
+/// layer wins every hover, so window mode only ever offers "the whole screen".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn mac_skip_reason(layer: i32, alpha: f64, covers_monitor: bool) -> Option<&'static str> {
+    if alpha < 0.05 {
+        Some("invisible")
+    } else if !(0..=MAC_TOP_APP_LAYER).contains(&layer) {
+        Some("system layer (menu bar, Dock, overlays)")
+    } else if layer != 0 && covers_monitor {
+        Some("full-screen floating window")
+    } else {
+        None
+    }
+}
+
+/// Layer, alpha and owner of every on-screen window (macOS), keyed by window number.
+#[cfg(target_os = "macos")]
+fn mac_window_props() -> HashMap<u32, (i32, f64, String)> {
+    use objc2_core_foundation::{CFDictionary, CFNumber, CFNumberType, CFString};
+    use objc2_core_graphics::{
+        kCGWindowAlpha, kCGWindowLayer, kCGWindowNumber, kCGWindowOwnerName,
+        CGWindowListCopyWindowInfo, CGWindowListOption,
+    };
+    use std::ffi::c_void;
+
+    let mut out = HashMap::new();
+    let Some(list) = CGWindowListCopyWindowInfo(
+        CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+        0,
+    ) else {
+        return out;
+    };
+    // SAFETY: the array holds CFDictionary values; the keys are CoreGraphics constants and each
+    // value is read as its documented type (numbers via CFNumberGetValue, owner as CFString).
+    unsafe {
+        let get =
+            |d: &CFDictionary, key: &CFString| d.value(key as *const CFString as *const c_void);
+        let number = |d: &CFDictionary, key: &CFString, ty: CFNumberType, out: *mut c_void| {
+            let n = get(d, key) as *const CFNumber;
+            !n.is_null() && (*n).value(ty, out)
+        };
+        for i in 0..list.count() {
+            let d = list.value_at_index(i) as *const CFDictionary;
+            let Some(d) = d.as_ref() else { continue };
+            let (mut id, mut layer, mut alpha) = (0i32, 0i32, 1f64);
+            if !number(
+                d,
+                kCGWindowNumber,
+                CFNumberType::IntType,
+                &mut id as *mut i32 as *mut c_void,
+            ) {
+                continue;
+            }
+            number(
+                d,
+                kCGWindowLayer,
+                CFNumberType::IntType,
+                &mut layer as *mut i32 as *mut c_void,
+            );
+            number(
+                d,
+                kCGWindowAlpha,
+                CFNumberType::DoubleType,
+                &mut alpha as *mut f64 as *mut c_void,
+            );
+            let owner = (get(d, kCGWindowOwnerName) as *const CFString)
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            out.insert(id as u32, (layer, alpha, owner));
+        }
+    }
+    out
+}
+
 /// Does `rect` cover (almost) all of one monitor?
 fn covers_a_monitor(rect: &Rect, frames: &[CaptureFrame]) -> bool {
     frames.iter().any(|f| {
@@ -210,6 +290,8 @@ pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
     let count = windows.len() as i32;
     // looking up an app name opens the process; many windows share one
     let mut app_names: HashMap<u32, String> = HashMap::new();
+    #[cfg(target_os = "macos")]
+    let mac_props = mac_window_props();
     let mut out = Vec::new();
     for (index, w) in windows.into_iter().enumerate() {
         let id = w.id().unwrap_or(0);
@@ -272,13 +354,21 @@ pub fn list_windows(frames: &[CaptureFrame], verbose: bool) -> Vec<WindowInfo> {
                 continue;
             }
         }
-        // On Windows xcap lists windows top-most first (EnumWindows order), so the position is
-        // the z-order; w.z() would re-enumerate every window for each call.
-        let z = if cfg!(windows) {
-            count - index as i32
-        } else {
-            w.z().unwrap_or(0)
-        };
+        #[cfg(target_os = "macos")]
+        if let Some((layer, alpha, owner)) = mac_props.get(&id) {
+            if let Some(reason) = mac_skip_reason(*layer, *alpha, covers_a_monitor(&rect, frames)) {
+                if verbose {
+                    log::info!(
+                        "window skipped ({reason}): {title:?} app={app_name:?} owner={owner:?} layer={layer} alpha={alpha} rect={rect:?}"
+                    );
+                }
+                continue;
+            }
+        }
+        // xcap lists windows top-most first on Windows (EnumWindows) and macOS
+        // (CGWindowListCopyWindowInfo), so the position is the z-order; w.z() would
+        // re-enumerate every window for each call.
+        let z = count - index as i32;
         out.push(WindowInfo {
             id,
             title,
@@ -701,6 +791,15 @@ mod tests {
         // normal windows (maximized ones too), always-on-top small windows, the taskbar
         assert!(skip_reason(&style(0x100, None, "Chrome_WidgetWin_1"), true).is_none());
         assert!(skip_reason(&style(0x8, None, "Notepad"), false).is_none());
+        // macOS: normal windows and floating palettes stay; system layers and ghosts go
+        assert!(mac_skip_reason(0, 1.0, false).is_none());
+        assert!(mac_skip_reason(0, 1.0, true).is_none()); // a maximised app window
+        assert!(mac_skip_reason(3, 1.0, false).is_none());
+        assert!(mac_skip_reason(3, 1.0, true).is_some());
+        assert!(mac_skip_reason(25, 1.0, false).is_some()); // menu bar / status items
+        assert!(mac_skip_reason(20, 1.0, true).is_some()); // Dock
+        assert!(mac_skip_reason(0, 0.0, true).is_some());
+        assert!(mac_skip_reason(-2147483624, 1.0, true).is_some());
         assert!(skip_reason(&style(0x8_0000, Some(230), "ConsoleWindowClass"), false).is_none());
         assert!(skip_reason(&style(0x80 | 0x8, None, "Shell_TrayWnd"), false).is_none());
     }
