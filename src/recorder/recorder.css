@@ -65,3 +65,12 @@ body,
   border-color: #ff453a;
   color: #fff;
 }
+
+.bar.scroll .rec {
+  background: var(--accent);
+}
+
+.bar.scroll button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}

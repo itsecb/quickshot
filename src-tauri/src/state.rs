@@ -24,6 +24,8 @@ pub enum CaptureMode {
     Color,
     Qr,
     Watch,
+    Scroll,
+    Record,
 }
 
 impl CaptureMode {
@@ -38,6 +40,8 @@ impl CaptureMode {
             "color" => Self::Color,
             "qr" | "barcode" => Self::Qr,
             "watch" => Self::Watch,
+            "scroll" | "long" => Self::Scroll,
+            "record" | "gif" => Self::Record,
             _ => return None,
         })
     }
@@ -87,6 +91,8 @@ pub struct AppState {
     pub captures: Mutex<HashMap<u64, Arc<Capture>>>,
     pub last_region: Mutex<Option<Rect>>,
     pub temp_files: Mutex<Vec<PathBuf>>,
+    /// Files a page may load through `shot://…/file/<token>` (e.g. a GIF in its thumbnail).
+    pub shared_files: Mutex<HashMap<u64, PathBuf>>,
     pub pending_steps: Mutex<Vec<PendingStep>>,
     /// A capture was triggered and has not reached the overlay/output yet (incl. countdown).
     pub capture_pending: AtomicBool,
@@ -105,6 +111,7 @@ impl AppState {
             captures: Mutex::new(HashMap::new()),
             last_region: Mutex::new(None),
             temp_files: Mutex::new(Vec::new()),
+            shared_files: Mutex::new(HashMap::new()),
             pending_steps: Mutex::new(Vec::new()),
             capture_pending: AtomicBool::new(false),
             countdown_cancel: AtomicBool::new(false),
@@ -162,6 +169,13 @@ impl AppState {
     /// Swap in processed pixels (e.g. redacted) for a capture that windows already refer to.
     pub fn replace_capture(&self, capture: Arc<Capture>) {
         self.captures.lock().unwrap().insert(capture.id, capture);
+    }
+
+    /// Let pages load this file by token (never by path, so nothing else is reachable).
+    pub fn share_file(&self, path: PathBuf) -> u64 {
+        let token = self.next_id();
+        self.shared_files.lock().unwrap().insert(token, path);
+        token
     }
 
     pub fn remove_capture(&self, id: u64) {

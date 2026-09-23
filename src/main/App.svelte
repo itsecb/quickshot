@@ -78,6 +78,8 @@
     { key: "qr", label: "Read QR code / barcode", mode: "qr" },
     { key: "watch", label: "Watch a region for changes", mode: "watch" },
     { key: "recordSteps", label: "Record steps (start / stop)", mode: "steps" },
+    { key: "scroll", label: "Scrolling capture (long page)", mode: "scroll" },
+    { key: "recordGif", label: "Record a GIF (start / stop)", mode: "record" },
     { key: "history", label: "Open history", mode: "history" },
   ];
 

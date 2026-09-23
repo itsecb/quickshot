@@ -123,6 +123,7 @@ pub fn open_thumb(app: &AppHandle, capture: &Capture, status: &str) -> AppResult
     )
     .title("QuickShot")
     .initialization_script(format!("window.__QS_THUMB = {init};"))
+    .content_protected(true)
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)
@@ -176,6 +177,7 @@ pub fn open_alert(app: &AppHandle, watch_id: u64, init: &str) -> AppResult<()> {
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("alert.html".into()))
         .title("QuickShot watch alert")
         .initialization_script(format!("window.__QS_ALERT = {init};"))
+        .content_protected(true)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -199,12 +201,14 @@ pub fn open_alert(app: &AppHandle, watch_id: u64, init: &str) -> AppResult<()> {
 
 pub const RECORDER_LABEL: &str = "recorder";
 
-/// Floating control bar while the step recorder runs: bottom-centre of the cursor's monitor,
-/// never focused (clicks on it are ignored by the recorder).
-pub fn open_recorder(app: &AppHandle) -> AppResult<()> {
-    if app.get_webview_window(RECORDER_LABEL).is_some() {
-        return Ok(());
+/// Floating control bar (step recorder, scrolling capture, GIF recording): bottom-centre of the
+/// cursor's monitor, never focused, and excluded from screen capture so it never shows up in
+/// what's being captured. `kind` picks the controls; `text` is the first status line.
+pub fn open_bar(app: &AppHandle, kind: &str, text: &str) -> AppResult<()> {
+    if let Some(w) = app.get_webview_window(RECORDER_LABEL) {
+        let _ = w.destroy();
     }
+    let init = serde_json::json!({ "kind": kind, "text": text });
     let (w, h) = (440.0, 64.0);
     let (cx, cy) = app
         .cursor_position()
@@ -213,7 +217,9 @@ pub fn open_recorder(app: &AppHandle) -> AppResult<()> {
     let (scale, work) = monitor_at(app, cx, cy);
     let window =
         WebviewWindowBuilder::new(app, RECORDER_LABEL, WebviewUrl::App("recorder.html".into()))
-            .title("QuickShot step recorder")
+            .title("QuickShot")
+            .initialization_script(format!("window.__QS_BAR = {init};"))
+            .content_protected(true)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)
@@ -228,6 +234,62 @@ pub fn open_recorder(app: &AppHandle) -> AppResult<()> {
     if let Some(area) = work {
         let px = area.position.x + ((area.size.width as f64 - w * scale) / 2.0) as i32;
         let py = area.position.y + area.size.height as i32 - (h * scale + 16.0 * scale) as i32;
+        let _ = window.set_position(PhysicalPosition::new(px, py));
+    }
+    show_fallback(&window);
+    Ok(())
+}
+
+/// Floating thumbnail for a file that isn't a capture (a recorded GIF): shows it, and offers
+/// copy (as a file), drag-out and show-in-folder.
+pub fn open_file_thumb(app: &AppHandle, path: &std::path::Path, status: &str) -> AppResult<()> {
+    for (label, w) in app.webview_windows() {
+        if label.starts_with("thumb-") {
+            let _ = w.destroy();
+        }
+    }
+    let token = app
+        .state::<crate::state::AppState>()
+        .share_file(path.to_path_buf());
+    let (img_w, img_h) = image::image_dimensions(path).unwrap_or((16, 9));
+    let card_w = 300.0;
+    let image_h = (card_w * img_h as f64 / img_w.max(1) as f64).clamp(90.0, 190.0);
+    let (w, h) = (card_w + 24.0, image_h + 96.0 + 24.0);
+    let init = serde_json::json!({
+        "status": status,
+        "file": {
+            "url": crate::protocol::file_url(token),
+            "path": path.display().to_string(),
+        },
+    });
+    let (cx, cy) = app
+        .cursor_position()
+        .map(|p| (p.x as i32, p.y as i32))
+        .unwrap_or((0, 0));
+    let (scale, work) = monitor_at(app, cx, cy);
+    let window = WebviewWindowBuilder::new(
+        app,
+        format!("thumb-file-{token}"),
+        WebviewUrl::App("thumb.html".into()),
+    )
+    .title("QuickShot")
+    .initialization_script(format!("window.__QS_THUMB = {init};"))
+    .content_protected(true)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .transparent(true)
+    .focused(false)
+    .focusable(false)
+    .visible(false)
+    .inner_size(w, h)
+    .build()?;
+    if let Some(area) = work {
+        let margin = 12.0 * scale;
+        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
+        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
         let _ = window.set_position(PhysicalPosition::new(px, py));
     }
     show_fallback(&window);
@@ -255,6 +317,7 @@ pub fn open_countdown(app: &AppHandle, secs: u32) -> AppResult<()> {
     )
     .title("QuickShot countdown")
     .initialization_script(format!("window.__QS_COUNTDOWN = {secs};"))
+    .content_protected(true)
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)

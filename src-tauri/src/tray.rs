@@ -61,6 +61,20 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
         .item(&item("capture_pin", "Pin region to screen", &hk.pin)?)
         .item(&item("capture_color", "Pick color", &hk.color)?)
         .item(&item("capture_qr", "Read QR code / barcode", &hk.qr)?)
+        .item(&item(
+            "capture_scroll",
+            "Scrolling capture (long page)",
+            &hk.scroll,
+        )?)
+        .item(&item(
+            "capture_record",
+            if crate::record::is_recording() {
+                "Stop GIF recording"
+            } else {
+                "Record a GIF…"
+            },
+            &hk.record_gif,
+        )?)
         .separator()
         .item(&item("capture_watch", "Watch a region…", &hk.watch)?)
         .item(&item(
@@ -117,6 +131,14 @@ pub fn build(app: &AppHandle, settings: &Settings) -> AppResult<()> {
             "capture_color" => capture::trigger(app, CaptureMode::Color),
             "capture_qr" => capture::trigger(app, CaptureMode::Qr),
             "capture_watch" => capture::trigger(app, CaptureMode::Watch),
+            "capture_scroll" => capture::trigger(app, CaptureMode::Scroll),
+            "capture_record" => {
+                if crate::record::is_recording() {
+                    crate::record::stop();
+                } else {
+                    capture::trigger(app, CaptureMode::Record);
+                }
+            }
             "steps_toggle" => crate::steps::toggle(app),
             "open_watches" => windows::open_watches(app),
             "open_history" => windows::open_history(app),

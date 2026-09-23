@@ -1,3 +1,4 @@
+mod bar;
 mod capture;
 mod cli;
 mod commands;
@@ -13,12 +14,15 @@ mod output;
 mod overlay;
 mod protocol;
 mod qr;
+mod record;
 mod redact;
 mod rules;
+mod scroll;
 mod settings;
 mod state;
 mod step_marks;
 mod steps;
+mod stitch;
 mod table;
 mod ticket;
 mod tray;
@@ -172,6 +176,8 @@ pub fn run() {
             commands::capture::trigger_capture,
             commands::capture::cancel_countdown,
             commands::capture::element_chain,
+            commands::capture::bar_stop,
+            commands::capture::copy_file,
             commands::output::editor_init,
             commands::output::release_capture,
             commands::output::copy_image,

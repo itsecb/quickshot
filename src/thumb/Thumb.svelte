@@ -1,12 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { invoke } from "@tauri-apps/api/core";
   import { startDrag } from "@crabnebula/tauri-plugin-drag";
+  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { copyCapture, currentLabel, thumbAction, thumbDragPath, thumbInit, type ThumbInit } from "$lib/ipc";
   import { icon } from "../editor/icons";
 
-  const LIFETIME_MS = 6000;
-  const status = (window as unknown as { __QS_THUMB?: { status: string } }).__QS_THUMB?.status ?? "Captured";
+  type Init = { status: string; file?: { url: string; path: string } };
+  const init = (window as unknown as { __QS_THUMB?: Init }).__QS_THUMB;
+  const status = init?.status ?? "Captured";
+  /** A saved file that isn't a capture (a recorded GIF): no editor, copied as a file. */
+  const file = init?.file ?? null;
+  const LIFETIME_MS = file ? 12000 : 6000;
   const win = getCurrentWindow();
 
   let info = $state<ThumbInit | null>(null);
@@ -14,11 +20,12 @@
   let leaving = $state(false);
   let hovering = $state(false);
   let remaining = $state(LIFETIME_MS);
-  let dragPath: string | null = null;
+  let dragPath: string | null = file?.path ?? null;
   let dragIcon: string | null = null;
 
   onMount(() => {
     void (async () => {
+      if (file) return;
       try {
         info = await thumbInit(currentLabel());
         dragPath = await thumbDragPath(info.id);
@@ -57,9 +64,10 @@
   }
 
   async function copy() {
-    if (!info) return;
+    if (!info && !file) return;
     try {
-      await copyCapture(info.id);
+      if (file) await invoke("copy_file", { path: file.path });
+      else if (info) await copyCapture(info.id);
       note = "Copied to clipboard";
       remaining = Math.max(remaining, 2500);
     } catch (e) {
@@ -105,18 +113,25 @@
     class="shot"
     role="button"
     tabindex="-1"
-    title="Drag into any app · double-click to edit"
+    title={file ? "Drag into any app · double-click to open" : "Drag into any app · double-click to edit"}
     onmousedown={onDragStart}
-    ondblclick={() => act("edit")}
+    ondblclick={() => (file ? openPath(file.path).catch(() => {}) : act("edit"))}
   >
-    {#if info}
+    {#if file}
+      <img src={file.url} alt="Recording" crossorigin="anonymous" draggable="false" onload={(e) => makeIcon(e.currentTarget as HTMLImageElement)} />
+    {:else if info}
       <img src={info.pngUrl} alt="Capture" crossorigin="anonymous" draggable="false" onload={(e) => makeIcon(e.currentTarget as HTMLImageElement)} />
     {/if}
   </div>
   <div class="actions">
-    <button onclick={() => act("edit")} title="Open in the editor">{@html icon("pen")} Edit</button>
-    <button onclick={() => act("pin")} title="Pin on top of everything">{@html icon("pin")} Pin</button>
-    <button onclick={copy} title="Copy again">{@html icon("copy")} Copy</button>
+    {#if file}
+      <button onclick={copy} title="Copy the file (paste into Teams, Outlook or a folder)">{@html icon("copy")} Copy</button>
+      <button onclick={() => revealItemInDir(file.path).catch((e) => (note = String(e)))} title="Show in folder">{@html icon("folder")} Folder</button>
+    {:else}
+      <button onclick={() => act("edit")} title="Open in the editor">{@html icon("pen")} Edit</button>
+      <button onclick={() => act("pin")} title="Pin on top of everything">{@html icon("pin")} Pin</button>
+      <button onclick={copy} title="Copy again">{@html icon("copy")} Copy</button>
+    {/if}
     <span class="drag-hint">{@html icon("drag")} drag</span>
   </div>
   <div class="life" style={`transform:scaleX(${Math.max(0, remaining / LIFETIME_MS)})`}></div>

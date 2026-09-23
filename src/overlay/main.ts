@@ -169,6 +169,10 @@ class Overlay {
         return "Select a QR code or barcode to copy its contents · Esc cancels";
       case "watch":
         return "Select a region, or click a window or part of one, to watch for changes · Esc cancels";
+      case "scroll":
+        return "Select the part of the page that scrolls, or click it · QuickShot scrolls it for you · Esc cancels";
+      case "record":
+        return "Select the area to record as a GIF (one screen) · Esc cancels";
       default:
         return "Drag a region (Alt: no snapping) · click a window or part · scroll for bigger/smaller parts · Esc cancels";
     }

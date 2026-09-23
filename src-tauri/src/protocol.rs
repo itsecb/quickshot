@@ -37,6 +37,10 @@ pub fn capture_png_url(id: u64) -> String {
     format!("{}/capture/{id}.png", base_url())
 }
 
+pub fn file_url(token: u64) -> String {
+    format!("{}/file/{token}", base_url())
+}
+
 pub fn history_thumb_url(id: u64) -> String {
     format!("{}/history/{id}.jpg", base_url())
 }
@@ -156,6 +160,23 @@ pub fn handle<R: Runtime>(
                 Ok(p) => file(p, if thumb { "image/jpeg" } else { "image/png" }),
                 Err(e) => error(StatusCode::NOT_FOUND, &e.to_string()),
             }
+        }
+        "file" => {
+            // only files registered with `share_file`, looked up by token
+            let path = rest
+                .parse::<u64>()
+                .ok()
+                .and_then(|t| state.shared_files.lock().unwrap().get(&t).cloned());
+            let Some(path) = path else {
+                return error(StatusCode::NOT_FOUND, "unknown file");
+            };
+            let mime = match path.extension().and_then(|e| e.to_str()) {
+                Some("gif") => "image/gif",
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                _ => "application/octet-stream",
+            };
+            file(path, mime)
         }
         _ => error(StatusCode::NOT_FOUND, "unknown path"),
     }

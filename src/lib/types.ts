@@ -7,7 +7,7 @@ export interface Rect {
   height: number;
 }
 
-export type CaptureMode = "region" | "window" | "fullscreen" | "repeatLast" | "ocr" | "pin" | "color" | "qr" | "watch";
+export type CaptureMode = "region" | "window" | "fullscreen" | "repeatLast" | "ocr" | "pin" | "color" | "qr" | "watch" | "scroll" | "record";
 
 export interface MonitorInfo {
   id: number;
@@ -60,6 +60,8 @@ export interface Hotkeys {
   qr: string;
   watch: string;
   recordSteps: string;
+  scroll: string;
+  recordGif: string;
 }
 
 export type ImageFormat = "png" | "jpeg";

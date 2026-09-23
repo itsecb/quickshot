@@ -395,7 +395,7 @@ pub fn trigger_delayed(app: &AppHandle, mode: CaptureMode, delay_secs: u32) {
 }
 
 /// Show the countdown window and wait. Returns false when cancelled.
-fn countdown(app: &AppHandle, secs: u32) -> AppResult<bool> {
+pub(crate) fn countdown(app: &AppHandle, secs: u32) -> AppResult<bool> {
     if secs == 0 {
         return Ok(true);
     }
@@ -587,6 +587,19 @@ pub fn finish(app: &AppHandle, rect: Rect, window_id: Option<u32>) -> AppResult<
         .find(|f| f.monitor.rect().intersect(&rect).is_some())
     {
         source.monitor_name = frame.monitor.name.clone();
+    }
+    if session.mode == CaptureMode::Scroll {
+        crate::scroll::start(app, rect, source);
+        return Ok(0);
+    }
+    if session.mode == CaptureMode::Record {
+        let name = if source.title.is_empty() {
+            "Recording".to_string()
+        } else {
+            source.title.clone()
+        };
+        crate::record::start(app, rect, name);
+        return Ok(0);
     }
     if session.mode == CaptureMode::Watch {
         // not a screenshot: keep an eye on this region from now on

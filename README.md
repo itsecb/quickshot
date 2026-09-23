@@ -35,6 +35,13 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 * **Step recorder** (`Ctrl+Shift+R`, Windows): every click captures the clicked window with the
   spot circled and a title like *Click the “Save” button in Notepad*; stop and the steps open as a
   new guide ready to export to Word/HTML/Markdown. No keystrokes are recorded.
+* **Scrolling capture** (`Ctrl+Shift+L`, Windows): select the part of a page that scrolls and
+  QuickShot scrolls it for you, stitching one tall image (sticky headers and footers appear once).
+  Stops at the end of the page, at 20 000 px, or when you press Esc / Done.
+* **GIF recording** (`Ctrl+Shift+G`, press again to stop): select an area, and after a 3-second
+  countdown it records up to 60 s at 12 fps into the screenshots folder. The thumbnail plays it
+  and copies it as a file (pastes into Teams/Outlook) or drags it anywhere. QuickShot's own bars
+  never appear in recordings.
 * **Per-app rules** (Settings → Rules): skip history, auto-redact, always copy, or also save to a folder
   based on the app or window title. Ships with a rule that keeps password managers out of history.
 * **Scriptable capture**: `quickshot --out <file|folder>` captures with no UI and a real exit code
@@ -60,7 +67,9 @@ step-by-step guide builder. Built with Tauri v2 (Rust) and Svelte.
 
 Default global hotkeys: `Ctrl+Shift+1` region · `Ctrl+Shift+2` window · `Ctrl+Shift+3` full screen ·
 `Ctrl+Shift+4` repeat last · `Ctrl+Shift+O` OCR · `Ctrl+Shift+P` pin · `Ctrl+Shift+C` colour ·
-`Ctrl+Shift+H` history · `Ctrl+Shift+5` delayed region · `Ctrl+Shift+Q` QR/barcode.
+`Ctrl+Shift+H` history · `Ctrl+Shift+5` delayed region · `Ctrl+Shift+Q` QR/barcode ·
+`Ctrl+Shift+W` watch · `Ctrl+Shift+R` record steps · `Ctrl+Shift+L` scrolling capture ·
+`Ctrl+Shift+G` GIF recording.
 
 ## Scriptable capture
 

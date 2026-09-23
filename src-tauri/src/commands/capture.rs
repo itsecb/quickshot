@@ -78,3 +78,36 @@ pub fn cancel_countdown(state: State<'_, AppState>) {
 pub fn element_chain(window_id: u32, x: i32, y: i32) -> Vec<Rect> {
     crate::uia::element_chain(window_id, x, y)
 }
+
+/// Stop button on the floating bar.
+#[tauri::command(async)]
+pub fn bar_stop(app: AppHandle, kind: String) {
+    match kind.as_str() {
+        "scroll" => crate::scroll::stop(),
+        "gif" => crate::record::stop(),
+        "steps" => {
+            crate::steps::stop(&app);
+        }
+        _ => {}
+    }
+}
+
+/// Put a file on the clipboard as a file (pastes as an attachment in Teams/Outlook/Explorer).
+#[tauri::command(async)]
+pub fn copy_file(path: String) -> AppResult<()> {
+    #[cfg(windows)]
+    {
+        use clipboard_win::{raw, Clipboard};
+        let err = |e: clipboard_win::ErrorCode| AppError::Other(format!("clipboard: {e}"));
+        let _open = Clipboard::new_attempts(10).map_err(err)?;
+        raw::empty().map_err(err)?;
+        raw::set_file_list(&[path]).map_err(err)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err(AppError::Other(
+            "Copying files is Windows-only for now; drag it instead".into(),
+        ))
+    }
+}

@@ -19,6 +19,7 @@ export const icons: Record<string, string> = {
   pin: '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3zM12 15v6"/>',
   ocr: '<path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M8 9h8M12 9v7"/>',
   guide: '<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h3"/>',
+  folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
   drag: '<path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/>',
   fit: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
   clear: '<path d="M6 6l12 12M18 6L6 18"/>',

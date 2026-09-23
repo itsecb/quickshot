@@ -118,12 +118,7 @@ pub fn start(app: &AppHandle) -> AppResult<()> {
         started: chrono::Local::now(),
         handle,
     });
-    let app2 = app.clone();
-    app.run_on_main_thread(move || {
-        if let Err(e) = crate::windows::open_recorder(&app2) {
-            log::error!("recorder bar failed: {e}");
-        }
-    })?;
+    crate::bar::open(app, "steps", "");
     refresh_tray(app);
     announce(app);
     Ok(())
@@ -135,9 +130,7 @@ pub fn stop(app: &AppHandle) -> usize {
         return 0;
     };
     imp::stop(session.handle);
-    if let Some(w) = app.get_webview_window(crate::windows::RECORDER_LABEL) {
-        let _ = w.destroy();
-    }
+    crate::bar::close(app);
     let steps = std::mem::take(&mut *session.steps.lock().unwrap());
     let count = steps.len();
     if count > 0 {

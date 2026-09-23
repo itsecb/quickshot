@@ -27,6 +27,8 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
         (settings.hotkeys.color.as_str(), CaptureMode::Color),
         (settings.hotkeys.qr.as_str(), CaptureMode::Qr),
         (settings.hotkeys.watch.as_str(), CaptureMode::Watch),
+        (settings.hotkeys.scroll.as_str(), CaptureMode::Scroll),
+        (settings.hotkeys.record_gif.as_str(), CaptureMode::Record),
     ];
     let mut conflicts = Vec::new();
     for (accel, mode) in bindings {
@@ -35,8 +37,14 @@ pub fn register_all(app: &AppHandle, settings: &Settings) -> Vec<String> {
             continue;
         }
         let result = gs.on_shortcut(accel, move |app, _shortcut, event| {
-            if event.state() == ShortcutState::Pressed {
-                capture::trigger(app, mode);
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            // the same hotkey stops a GIF recording / scrolling capture that's running
+            match mode {
+                CaptureMode::Record if crate::record::is_recording() => crate::record::stop(),
+                CaptureMode::Scroll if crate::scroll::is_running() => crate::scroll::stop(),
+                _ => capture::trigger(app, mode),
             }
         });
         if let Err(e) = result {

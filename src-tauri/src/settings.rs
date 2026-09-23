@@ -22,6 +22,8 @@ pub struct Hotkeys {
     pub qr: String,
     pub watch: String,
     pub record_steps: String,
+    pub scroll: String,
+    pub record_gif: String,
 }
 
 impl Default for Hotkeys {
@@ -39,6 +41,8 @@ impl Default for Hotkeys {
             qr: "Ctrl+Shift+Q".into(),
             watch: "Ctrl+Shift+W".into(),
             record_steps: "Ctrl+Shift+R".into(),
+            scroll: "Ctrl+Shift+L".into(),
+            record_gif: "Ctrl+Shift+G".into(),
         }
     }
 }
