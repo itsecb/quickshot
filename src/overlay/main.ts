@@ -86,7 +86,15 @@ class Overlay {
   private clean!: HTMLCanvasElement;
   private dimmed!: HTMLCanvasElement;
   private init!: OverlayInit;
-  private dpr = window.devicePixelRatio || 1;
+  /**
+   * Frame pixels per CSS pixel. Measured from the canvas rather than read once from
+   * devicePixelRatio: the window may still be settling onto a monitor with different scaling
+   * when the page loads, and a stale ratio sends every hover to the wrong place.
+   */
+  private get dpr(): number {
+    const css = this.canvas.clientWidth || window.innerWidth;
+    return css > 0 && this.canvas.width > 0 ? this.canvas.width / css : window.devicePixelRatio || 1;
+  }
   private chrome!: ReturnType<typeof chromeColors>;
   private cursor: Point | null = null; // local physical px
   private dragStart: Point | null = null; // global physical px
@@ -229,7 +237,13 @@ class Overlay {
         return;
       }
       if (seq !== this.querySeq || this.hoverWindow?.id !== w.id || this.dragStart) return; // stale
-      this.chain = chain.length > 1 ? chain : null;
+      // never let a part be bigger than the window it's in (level 0 is the window as listed)
+      const parts = chain
+        .slice(1)
+        .map((r) => rectIntersect(r, w.rect))
+        .filter((r): r is Rect => !!r && !rectEquals(r, w.rect))
+        .filter((r, i, all) => i === 0 || !rectEquals(r, all[i - 1]!));
+      this.chain = parts.length ? [w.rect, ...parts] : null;
       this.level = this.chain ? this.pickLevel(this.chain) : 0;
       this.schedule();
     }, ELEMENT_DELAY_MS);

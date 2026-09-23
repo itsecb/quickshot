@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::capture::{self, MonitorInfo, WindowInfo};
 use crate::error::{AppError, AppResult};
@@ -46,6 +46,15 @@ pub fn overlay_init(state: State<'_, AppState>, label: String) -> AppResult<Over
 
 #[tauri::command]
 pub fn overlay_ready(app: AppHandle, label: String) -> AppResult<()> {
+    // where the overlay actually ended up; mixed-scaling setups are where this goes wrong
+    if let Some(w) = app.get_webview_window(&label) {
+        log::info!(
+            "{label} ready: at {:?}, size {:?}, scale {:?}",
+            w.outer_position().ok(),
+            w.inner_size().ok(),
+            w.scale_factor().ok()
+        );
+    }
     capture::overlay_ready(&app, &label)
 }
 

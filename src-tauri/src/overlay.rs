@@ -1,6 +1,6 @@
 //! One opaque, undecorated, always-on-top window per monitor showing the frozen frame.
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::capture::MonitorInfo;
 use crate::error::AppResult;
@@ -41,8 +41,10 @@ pub fn open(app: &AppHandle, monitors: &[MonitorInfo]) -> AppResult<()> {
             .build()?;
         // Re-apply in physical pixels: the builder only accepts logical values and the
         // logical->physical conversion before the window exists uses an ambiguous DPI.
-        window.set_position(PhysicalPosition::new(m.x, m.y))?;
-        window.set_size(PhysicalSize::new(m.width, m.height))?;
+        // (and keep it there: moving it onto a monitor with other scaling makes Windows
+        // rescale it, sometimes only after it's shown, which used to spill it onto the next
+        // screen and scramble hit-testing)
+        crate::windows::pin_rect(&window, m.x, m.y, m.width, m.height);
     }
     Ok(())
 }

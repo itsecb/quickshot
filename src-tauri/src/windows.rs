@@ -1,8 +1,8 @@
 //! Helpers for the editor, pin, guide and main windows plus notifications.
 
 use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_notification::NotificationExt;
 
@@ -27,6 +27,48 @@ fn show_fallback(window: &WebviewWindow) {
             log::warn!("{} did not show itself; showing it", window.label());
             let _ = window.show();
         }
+    });
+}
+
+/// Put a window at an exact physical rect and keep it there.
+///
+/// A new window gets the DPI of whichever monitor Windows puts it on first. Moving it to a
+/// monitor with different scaling makes Windows rescale it (WM_DPICHANGED), sometimes only once
+/// it's shown, so it grows or shrinks and can end up on the neighbouring screen. Re-apply the
+/// rect whenever it drifts, with a cap so a window the OS insists on moving can't loop forever.
+pub(crate) fn pin_rect(window: &WebviewWindow, x: i32, y: i32, w: u32, h: u32) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let apply = move |win: &WebviewWindow| {
+        let _ = win.set_position(PhysicalPosition::new(x, y));
+        let _ = win.set_size(PhysicalSize::new(w, h));
+    };
+    apply(window);
+    let corrections = Arc::new(AtomicU32::new(0));
+    let win = window.clone();
+    window.on_window_event(move |event| {
+        if !matches!(
+            event,
+            WindowEvent::Moved(_)
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            return;
+        }
+        let pos = win.outer_position().map(|p| (p.x, p.y)).ok();
+        let size = win.inner_size().map(|s| (s.width, s.height)).ok();
+        if pos == Some((x, y)) && size == Some((w, h)) {
+            return;
+        }
+        if corrections.fetch_add(1, Ordering::SeqCst) >= 8 {
+            return;
+        }
+        log::debug!(
+            "{} drifted to {pos:?} {size:?}; putting it back at ({x}, {y}) {w}x{h}",
+            win.label()
+        );
+        // not from inside the event callback: that can re-enter the window procedure
+        let win = win.clone();
+        std::thread::spawn(move || apply(&win));
     });
 }
 
@@ -136,10 +178,11 @@ pub fn open_thumb(app: &AppHandle, capture: &Capture, status: &str) -> AppResult
     .inner_size(w, h)
     .build()?;
     if let Some(area) = work {
-        let margin = 12.0 * scale;
-        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
-        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
-        let _ = window.set_position(PhysicalPosition::new(px, py));
+        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+        let margin = (12.0 * scale) as i32;
+        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
+        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
+        pin_rect(&window, px, py, pw, ph);
     }
     show_fallback(&window);
     Ok(())
@@ -190,10 +233,11 @@ pub fn open_alert(app: &AppHandle, watch_id: u64, init: &str) -> AppResult<()> {
         .inner_size(w, h)
         .build()?;
     if let Some(area) = work {
-        let margin = 12.0 * scale;
-        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
-        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
-        let _ = window.set_position(PhysicalPosition::new(px, py));
+        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+        let margin = (12.0 * scale) as i32;
+        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
+        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
+        pin_rect(&window, px, py, pw, ph);
     }
     show_fallback(&window);
     Ok(())
@@ -232,9 +276,10 @@ pub fn open_bar(app: &AppHandle, kind: &str, text: &str) -> AppResult<()> {
             .inner_size(w, h)
             .build()?;
     if let Some(area) = work {
-        let px = area.position.x + ((area.size.width as f64 - w * scale) / 2.0) as i32;
-        let py = area.position.y + area.size.height as i32 - (h * scale + 16.0 * scale) as i32;
-        let _ = window.set_position(PhysicalPosition::new(px, py));
+        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+        let px = area.position.x + (area.size.width as i32 - pw as i32) / 2;
+        let py = area.position.y + area.size.height as i32 - ph as i32 - (16.0 * scale) as i32;
+        pin_rect(&window, px, py, pw, ph);
     }
     show_fallback(&window);
     Ok(())
@@ -287,10 +332,11 @@ pub fn open_file_thumb(app: &AppHandle, path: &std::path::Path, status: &str) ->
     .inner_size(w, h)
     .build()?;
     if let Some(area) = work {
-        let margin = 12.0 * scale;
-        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
-        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
-        let _ = window.set_position(PhysicalPosition::new(px, py));
+        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+        let margin = (12.0 * scale) as i32;
+        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
+        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
+        pin_rect(&window, px, py, pw, ph);
     }
     show_fallback(&window);
     Ok(())
@@ -330,10 +376,11 @@ pub fn open_countdown(app: &AppHandle, secs: u32) -> AppResult<()> {
     .inner_size(w, h);
     let window = builder.build()?;
     if let Some(area) = work {
-        let margin = 24.0 * scale;
-        let px = area.position.x + area.size.width as i32 - (w * scale + margin) as i32;
-        let py = area.position.y + area.size.height as i32 - (h * scale + margin) as i32;
-        let _ = window.set_position(PhysicalPosition::new(px, py));
+        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+        let margin = (24.0 * scale) as i32;
+        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
+        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
+        pin_rect(&window, px, py, pw, ph);
     }
     show_fallback(&window);
     Ok(())
