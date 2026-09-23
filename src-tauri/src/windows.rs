@@ -30,6 +30,79 @@ fn show_fallback(window: &WebviewWindow) {
     });
 }
 
+/// Where a small floating window goes, in physical pixels of its monitor.
+#[derive(Clone, Copy)]
+pub(crate) struct Place {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    scale: f64,
+}
+
+/// Bottom-right corner of the work area, `margin` logical px in.
+fn corner(
+    work: Option<tauri::PhysicalRect<i32, u32>>,
+    scale: f64,
+    w: f64,
+    h: f64,
+    margin: f64,
+) -> Option<Place> {
+    let area = work?;
+    let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+    let m = (margin * scale) as i32;
+    Some(Place {
+        x: area.position.x + area.size.width as i32 - pw as i32 - m,
+        y: area.position.y + area.size.height as i32 - ph as i32 - m,
+        w: pw,
+        h: ph,
+        scale,
+    })
+}
+
+/// Bottom-centre of the work area, `margin` logical px up.
+fn bottom_centre(
+    work: Option<tauri::PhysicalRect<i32, u32>>,
+    scale: f64,
+    w: f64,
+    h: f64,
+    margin: f64,
+) -> Option<Place> {
+    let area = work?;
+    let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+    Some(Place {
+        x: area.position.x + (area.size.width as i32 - pw as i32) / 2,
+        y: area.position.y + area.size.height as i32 - ph as i32 - (margin * scale) as i32,
+        w: pw,
+        h: ph,
+        scale,
+    })
+}
+
+/// Build a window directly on its target monitor, then pin it there.
+///
+/// Created without a position, Windows puts a window on the main display at that display's
+/// scaling; moving it to a monitor with different scaling afterwards rescales it, and
+/// WebView2 can keep stale bounds (content shifted or cut off inside the window). Given a
+/// position, the window is created on the right monitor at the right scaling from the start.
+trait BuildAt {
+    fn build_at(self, place: Option<Place>) -> AppResult<WebviewWindow>;
+}
+
+impl BuildAt for WebviewWindowBuilder<'_, tauri::Wry, AppHandle> {
+    fn build_at(self, place: Option<Place>) -> AppResult<WebviewWindow> {
+        let builder = match place {
+            Some(p) => self.position(p.x as f64 / p.scale, p.y as f64 / p.scale),
+            None => self,
+        };
+        let window = builder.build()?;
+        if let Some(p) = place {
+            pin_rect(&window, p.x, p.y, p.w, p.h);
+        }
+        Ok(window)
+    }
+}
+
 /// Put a window at an exact physical rect and keep it there.
 ///
 /// A new window gets the DPI of whichever monitor Windows puts it on first. Moving it to a
@@ -158,6 +231,7 @@ pub fn open_thumb(app: &AppHandle, capture: &Capture, status: &str) -> AppResult
         .unwrap_or((0, 0));
     let (scale, work) = monitor_at(app, cx, cy);
     let init = serde_json::json!({ "status": status });
+    let place = corner(work, scale, w, h, 12.0);
     let window = WebviewWindowBuilder::new(
         app,
         format!("thumb-{}", capture.id),
@@ -176,14 +250,7 @@ pub fn open_thumb(app: &AppHandle, capture: &Capture, status: &str) -> AppResult
     .focusable(false)
     .visible(false)
     .inner_size(w, h)
-    .build()?;
-    if let Some(area) = work {
-        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
-        let margin = (12.0 * scale) as i32;
-        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
-        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
-        pin_rect(&window, px, py, pw, ph);
-    }
+    .build_at(place)?;
     show_fallback(&window);
     Ok(())
 }
@@ -217,6 +284,7 @@ pub fn open_alert(app: &AppHandle, watch_id: u64, init: &str) -> AppResult<()> {
         .map(|p| (p.x as i32, p.y as i32))
         .unwrap_or((0, 0));
     let (scale, work) = monitor_at(app, cx, cy);
+    let place = corner(work, scale, w, h, 12.0);
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("alert.html".into()))
         .title("QuickShot watch alert")
         .initialization_script(format!("window.__QS_ALERT = {init};"))
@@ -231,14 +299,7 @@ pub fn open_alert(app: &AppHandle, watch_id: u64, init: &str) -> AppResult<()> {
         .focusable(false)
         .visible(false)
         .inner_size(w, h)
-        .build()?;
-    if let Some(area) = work {
-        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
-        let margin = (12.0 * scale) as i32;
-        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
-        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
-        pin_rect(&window, px, py, pw, ph);
-    }
+        .build_at(place)?;
     show_fallback(&window);
     Ok(())
 }
@@ -259,6 +320,7 @@ pub fn open_bar(app: &AppHandle, kind: &str, text: &str) -> AppResult<()> {
         .map(|p| (p.x as i32, p.y as i32))
         .unwrap_or((0, 0));
     let (scale, work) = monitor_at(app, cx, cy);
+    let place = bottom_centre(work, scale, w, h, 16.0);
     let window =
         WebviewWindowBuilder::new(app, RECORDER_LABEL, WebviewUrl::App("recorder.html".into()))
             .title("QuickShot")
@@ -274,13 +336,7 @@ pub fn open_bar(app: &AppHandle, kind: &str, text: &str) -> AppResult<()> {
             .focusable(false)
             .visible(false)
             .inner_size(w, h)
-            .build()?;
-    if let Some(area) = work {
-        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
-        let px = area.position.x + (area.size.width as i32 - pw as i32) / 2;
-        let py = area.position.y + area.size.height as i32 - ph as i32 - (16.0 * scale) as i32;
-        pin_rect(&window, px, py, pw, ph);
-    }
+            .build_at(place)?;
     show_fallback(&window);
     Ok(())
 }
@@ -312,6 +368,7 @@ pub fn open_file_thumb(app: &AppHandle, path: &std::path::Path, status: &str) ->
         .map(|p| (p.x as i32, p.y as i32))
         .unwrap_or((0, 0));
     let (scale, work) = monitor_at(app, cx, cy);
+    let place = corner(work, scale, w, h, 12.0);
     let window = WebviewWindowBuilder::new(
         app,
         format!("thumb-file-{token}"),
@@ -330,14 +387,7 @@ pub fn open_file_thumb(app: &AppHandle, path: &std::path::Path, status: &str) ->
     .focusable(false)
     .visible(false)
     .inner_size(w, h)
-    .build()?;
-    if let Some(area) = work {
-        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
-        let margin = (12.0 * scale) as i32;
-        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
-        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
-        pin_rect(&window, px, py, pw, ph);
-    }
+    .build_at(place)?;
     show_fallback(&window);
     Ok(())
 }
@@ -374,14 +424,8 @@ pub fn open_countdown(app: &AppHandle, secs: u32) -> AppResult<()> {
     .visible(false)
     .transparent(true)
     .inner_size(w, h);
-    let window = builder.build()?;
-    if let Some(area) = work {
-        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
-        let margin = (24.0 * scale) as i32;
-        let px = area.position.x + area.size.width as i32 - pw as i32 - margin;
-        let py = area.position.y + area.size.height as i32 - ph as i32 - margin;
-        pin_rect(&window, px, py, pw, ph);
-    }
+    let place = corner(work, scale, w, h, 24.0);
+    let window = builder.build_at(place)?;
     show_fallback(&window);
     Ok(())
 }
@@ -424,18 +468,26 @@ pub fn open_editor(app: &AppHandle, capture: &Capture) -> AppResult<()> {
     } else {
         format!("QuickShot — {} ({}×{})", capture.source.title, img_w, img_h)
     };
-    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor.html".into()))
+    let centred = work.map(|w| {
+        (
+            w.position.x + ((w.size.width as f64 - want_w * scale) / 2.0).max(0.0) as i32,
+            w.position.y + ((w.size.height as f64 - want_h * scale) / 2.0).max(0.0) as i32,
+        )
+    });
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor.html".into()))
         .title(title)
         .inner_size(want_w, want_h)
         .min_inner_size(960.0, 480.0) // below this the toolbar can't fit even icon-only
-        .visible(false)
-        .build()?;
-    if let Some(w) = work {
-        let px = w.position.x + ((w.size.width as f64 - want_w * scale) / 2.0).max(0.0) as i32;
-        let py = w.position.y + ((w.size.height as f64 - want_h * scale) / 2.0).max(0.0) as i32;
+        .visible(false);
+    // created on the capture's monitor (see `BuildAt`): moving it there afterwards could
+    // leave the editor's page shifted inside the window on mixed-scaling setups
+    let builder = match centred {
+        Some((px, py)) => builder.position(px as f64 / scale, py as f64 / scale),
+        None => builder.center(),
+    };
+    let window = builder.build()?;
+    if let Some((px, py)) = centred {
         let _ = window.set_position(PhysicalPosition::new(px, py));
-    } else {
-        let _ = window.center();
     }
     show_fallback(&window);
     Ok(())
@@ -459,6 +511,7 @@ pub fn open_pin(app: &AppHandle, capture: &Capture, x: i32, y: i32) -> AppResult
         .visible(false)
         .inner_size(img_w as f64 / scale, img_h as f64 / scale)
         .min_inner_size(48.0, 48.0)
+        .position(x as f64 / scale, y as f64 / scale)
         .build()?;
     let _ = window.set_position(PhysicalPosition::new(x, y));
     let _ = window.set_size(LogicalSize::new(img_w as f64 / scale, img_h as f64 / scale));

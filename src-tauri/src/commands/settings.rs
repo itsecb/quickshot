@@ -92,3 +92,77 @@ pub fn hide_main(app: AppHandle) {
         let _ = w.hide();
     }
 }
+
+/// Windows 11's "Use the Print Screen key to open screen capture" (Snipping Tool). While it's
+/// on, Print Screen can't be a QuickShot hotkey without both opening. `None` when the setting
+/// isn't stored (older Windows, or never changed: then it follows the Windows default).
+#[tauri::command]
+pub fn print_screen_snipping() -> Option<bool> {
+    snipping::get()
+}
+
+/// Turn that Windows setting off for the current user.
+#[tauri::command]
+pub fn disable_print_screen_snipping() -> AppResult<()> {
+    snipping::set(false)
+}
+
+#[cfg(windows)]
+mod snipping {
+    use std::ffi::c_void;
+
+    use windows::core::w;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD,
+    };
+
+    use crate::error::{AppError, AppResult};
+
+    pub fn get() -> Option<bool> {
+        let (mut data, mut size) = (0u32, 4u32);
+        // SAFETY: reads a DWORD into a 4-byte buffer whose size is passed along.
+        let result = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                w!("Control Panel\\Keyboard"),
+                w!("PrintScreenKeyForSnippingEnabled"),
+                RRF_RT_REG_DWORD,
+                None,
+                Some(&mut data as *mut u32 as *mut c_void),
+                Some(&mut size),
+            )
+        };
+        result.is_ok().then_some(data != 0)
+    }
+
+    pub fn set(enabled: bool) -> AppResult<()> {
+        let data = enabled as u32;
+        // SAFETY: writes a 4-byte DWORD from a live local.
+        let result = unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                w!("Control Panel\\Keyboard"),
+                w!("PrintScreenKeyForSnippingEnabled"),
+                REG_DWORD.0,
+                Some(&data as *const u32 as *const c_void),
+                4,
+            )
+        };
+        result
+            .ok()
+            .map_err(|e| AppError::Other(format!("couldn't change the Windows setting: {e}")))
+    }
+}
+
+#[cfg(not(windows))]
+mod snipping {
+    use crate::error::{AppError, AppResult};
+
+    pub fn get() -> Option<bool> {
+        None
+    }
+
+    pub fn set(_enabled: bool) -> AppResult<()> {
+        Err(AppError::Other("only on Windows".into()))
+    }
+}

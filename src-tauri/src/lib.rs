@@ -177,6 +177,8 @@ pub fn run() {
             commands::capture::cancel_countdown,
             commands::capture::element_chain,
             commands::capture::bar_stop,
+            commands::settings::print_screen_snipping,
+            commands::settings::disable_print_screen_snipping,
             commands::capture::copy_file,
             commands::output::editor_init,
             commands::output::release_capture,

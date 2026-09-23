@@ -635,11 +635,86 @@ pub fn overlay_ready(app: &AppHandle, label: &str) -> AppResult<()> {
     if !session.shown && session.labels.iter().all(|l| session.ready.contains(l)) {
         session.shown = true;
         let labels = session.labels.clone();
+        let screens: Vec<Rect> = session.frames.iter().map(|f| f.monitor.rect()).collect();
         let focus = focus_label(app, session);
         drop(guard);
         overlay::show_all(app, &labels, focus.as_deref());
+        watch_foreground(app, labels, screens);
     }
     Ok(())
+}
+
+/// If another app's full-screen overlay takes over while ours are up, close ours. On Windows
+/// 11 the Snipping Tool opens on Print Screen too: it grabs the keyboard and mouse while our
+/// always-on-top frozen frame covers everything, so QuickShot looked hung and Esc never
+/// reached it. Only always-on-top windows covering a whole monitor count: another app merely
+/// keeping focus is normal (a delayed capture of an open menu).
+fn watch_foreground(app: &AppHandle, labels: Vec<String>, screens: Vec<Rect>) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
+            GWL_EXSTYLE, WS_EX_TOPMOST,
+        };
+        const GRACE: u32 = 6; // × 250 ms: time for our overlay to get focus, brief steals
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let own = std::process::id();
+            let mut foreign = 0;
+            loop {
+                std::thread::sleep(Duration::from_millis(250));
+                let active = app
+                    .state::<AppState>()
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|s| s.labels == labels);
+                if !active {
+                    return;
+                }
+                let (mut pid, mut topmost, mut rect) = (0u32, false, RECT::default());
+                // SAFETY: plain queries; a null or stale window just yields zeros/errors.
+                unsafe {
+                    let hwnd = GetForegroundWindow();
+                    if !hwnd.is_invalid() {
+                        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                        topmost =
+                            GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0;
+                        let _ = GetWindowRect(hwnd, &mut rect);
+                    }
+                }
+                let r = Rect::new(
+                    rect.left,
+                    rect.top,
+                    (rect.right - rect.left).max(0) as u32,
+                    (rect.bottom - rect.top).max(0) as u32,
+                );
+                let covers = screens.iter().any(|m| {
+                    r.intersect(m).is_some_and(|i| {
+                        i.width as u64 * i.height as u64 * 100
+                            >= m.width as u64 * m.height as u64 * 95
+                    })
+                });
+                let rival = pid != 0 && pid != own && topmost && covers;
+                foreign = if rival { foreign + 1 } else { 0 };
+                if foreign >= GRACE {
+                    log::warn!("another app (pid {pid}) took over the screen; closing the capture");
+                    cancel(&app);
+                    crate::windows::toast(
+                        &app,
+                        "Capture closed",
+                        "Another app's screen overlay opened on top. If Print Screen also opened the \
+                         Snipping Tool, turn that off in QuickShot Settings → Global hotkeys.",
+                    );
+                    return;
+                }
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    let _ = (app, labels, screens);
 }
 
 fn focus_label(app: &AppHandle, session: &CaptureSession) -> Option<String> {

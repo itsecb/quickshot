@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { appPaths, getSettings, hideMain, historyList, openWindow, setSettings, stepsStart, triggerCapture } from "$lib/ipc";
@@ -16,6 +17,28 @@
   let saving = $state(false);
   let error = $state<string | null>(null);
   let knownApps = $state<string[]>([]);
+  /** Windows' own Print Screen → Snipping Tool setting: true on, false off, null not stored. */
+  let snipping = $state<boolean | null>(null);
+  let snippingNote = $state<string | null>(null);
+  const usesPrintScreen = $derived(!!settings && Object.values(settings.hotkeys).some((h) => /PrintScreen/.test(h)));
+
+  async function refreshSnipping() {
+    try {
+      snipping = await invoke<boolean | null>("print_screen_snipping");
+    } catch {
+      snipping = null;
+    }
+  }
+
+  async function disableSnipping() {
+    try {
+      await invoke("disable_print_screen_snipping");
+      snipping = false;
+      snippingNote = "Done. If Print Screen still opens the Snipping Tool, sign out and back in once.";
+    } catch (e) {
+      snippingNote = String(e);
+    }
+  }
 
   async function openRules() {
     page = "rules";
@@ -87,6 +110,7 @@
     try {
       settings = await getSettings();
       paths = await appPaths();
+      void refreshSnipping();
     } catch (e) {
       error = String(e);
     }
@@ -145,7 +169,8 @@
   }
 </script>
 
-<svelte:window onkeydown={onRecordKey} />
+<!-- Print Screen only produces a key-up in the webview (Windows handles the key-down) -->
+<svelte:window onkeydown={onRecordKey} onkeyup={(e) => e.key === "PrintScreen" && onRecordKey(e)} />
 
 {#if error}
   <div style="padding:20px;color:var(--danger)">{error}</div>
@@ -210,6 +235,14 @@
             </div>
           </div>
         {/each}
+        {#if usesPrintScreen && snipping !== false && navigator.userAgent.includes("Windows")}
+          <div class="conflict">
+            Windows may also open the Snipping Tool when you press Print Screen (Settings → Accessibility → Keyboard), and both
+            would fight over the screen.
+            <button onclick={disableSnipping}>Turn that off</button>
+          </div>
+        {/if}
+        {#if snippingNote}<div class="ok">{snippingNote}</div>{/if}
         {#if conflicts.length}
           <div class="conflict">Some hotkeys could not be registered (already used by another app): {conflicts.join("; ")}</div>
         {/if}
